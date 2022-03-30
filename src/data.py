@@ -1,8 +1,6 @@
 from os.path import join, exists, basename, dirname
-from glob import glob
 from numpy import array, empty, hstack, random, tile
 from XRDXRFutils.data import SyntheticDataXRF
-import h5py
 from itertools import combinations
 
 class DataProcessing:
