@@ -1,9 +1,8 @@
 import torch.utilis.data as data
 
-
 class CustomDataset(data.Dataset):
     def __init__(self, inputs, targets, input_transform = None, target_transform = None):
-        super(DatasetFromH5, self).__init__()
+        super(CustomDataset, self).__init__()
         self.input_transform = input_transform
         self.target_transform = target_transform
         self.inputs = inputs

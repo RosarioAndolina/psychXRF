@@ -1,7 +1,8 @@
 from os.path import join, exists, basename, dirname
-from numpy import array, empty, hstack, random, tile
+from numpy import array, empty, hstack, random, tile, log, quantile, median
 from XRDXRFutils.data import SyntheticDataXRF
 from itertools import combinations
+import h5py
 
 class DataProcessing:
     def __init__(self, poisson = False):
@@ -75,7 +76,63 @@ class DataProcessing:
                           self.data.weight_fractions))
         return targets
 
-def input_transform(method = 'labels'):
-    if method == 'labels':
-        pass
+class DataTransform:
+    def __init__(self, inputs, targets = None, transform_file = None):
+        self.inputs = inputs
+        self.targets = targets
+        self.transform_file = transform_file
         
+    def load_transform_info(self, transform_file):
+        self.metadata = {}
+        with h5py.File(transform_file, 'r') as fin:
+            for k, v in fin.attrs.items():
+                self.metadata[k] = v
+            if self.metadata['norm'] == 'gauss':
+                self.Q1 = fin['Q1'][:]
+                sefl.median = fin['median'][:]
+                self.Q2 = fin['Q2'][:]
+        self.metadata['status'] = 'loaded'
+        if self.metadata['norm'] == 'zero_to_one':
+            self.Max = self.inputs.max()
+            self.Min = self.inputs.min()
+        return self
+    
+    def save_transform_info(self):
+        if not self.transform_file:
+            raise ValueError('Transform file needed')
+        if hasattr(self, 'metadata'):
+            with h5py.File(transform_file, 'w') as fout:
+                for k,v in self.metadata.items():
+                    fout.attrs[k] = v
+                if self.metadata['norm'] == 'gauss':
+                    dataset = fout.create_dataset('Q1', data = self.Q1)
+                    dataset = fout.create_dataset('median', data = self.median)
+                    dataset = fout.create_dataset('Q3', data = self.Q3)
+            return self
+        else:
+            raise ValueError("Nothing to save")
+    
+    def input_transform(self, Log = True, norm = 'gauss'):
+        if not hasattr(self, 'metadata'):
+            self.metadata = {}
+            self.metadata['Log'] = Log
+            self.metadata['norm'] = norm
+            self.metadata['status'] = 'new'
+            if Log:
+                self.inputs = log(self.inputs)
+            self.Q1 = quantile(self.inputs, 0.25, axis = 0)
+            self.median = median(self.inputs, axis = 0) 
+            self.Q3 = quantile(self.inputs, 0.75, axis = 0)
+            self.save_transform_info()
+        
+        if self.metadata['status'] == 'loaded':
+            if self.metadata['Log']:
+                self.inputs = log(self.inputs)
+        if self.metadata['norm'] == 'gauss':
+            self.inputs = (self.inputs - self.median)/(self.Q3 - self.Q1)
+        elif sefl.metadata['norm'] == 'zero_to_one':
+            self.Min = self.inputs.min()
+            self.Max = self.inputs.max()
+            self.inputs = (self.inputs - self.Min)/(self.Max - self.Min)
+        return self
+                    
