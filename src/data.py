@@ -1,8 +1,10 @@
 from os.path import join, exists, basename, dirname
-from numpy import array, empty, hstack, random, tile, log, quantile, median
+from numpy import array, empty, hstack, random, tile, log, quantile, median, arange
 from XRDXRFutils.data import SyntheticDataXRF
 from itertools import combinations
 import h5py
+from .dataset import CustomDataset
+import torch
 
 class DataProcessing:
     def __init__(self, poisson = False):
@@ -45,7 +47,7 @@ class DataProcessing:
         for symbol, roi in ROI.items():
             data_dict[symbol] = array([self.get_peaks_area(self.data.data, condition(r)) for r in roi]).sum(axis = 0)
             _min = data_dict[symbol][data_dict[symbol] > 0].min()
-            data_dict[symbol][data_dict[symbol] == 0] = _min * 1.0e-2
+            data_dict[symbol][data_dict[symbol] == 0.0] = _min * 1.0e-2
         datalen = data_dict['Pb'].shape[0]
         combo = list(combinations(self.data.metadata['reflayer_elements'],2))
         features_len = len(self.data.metadata['reflayer_elements']) + len(combo)
@@ -89,8 +91,8 @@ class DataTransform:
                 self.metadata[k] = v
             if self.metadata['norm'] == 'gauss':
                 self.Q1 = fin['Q1'][:]
-                sefl.median = fin['median'][:]
-                self.Q2 = fin['Q2'][:]
+                self.median = fin['median'][:]
+                self.Q3 = fin['Q3'][:]
         self.metadata['status'] = 'loaded'
         if self.metadata['norm'] == 'zero_to_one':
             self.Max = self.inputs.max()
@@ -101,7 +103,7 @@ class DataTransform:
         if not self.transform_file:
             raise ValueError('Transform file needed')
         if hasattr(self, 'metadata'):
-            with h5py.File(transform_file, 'w') as fout:
+            with h5py.File(self.transform_file, 'w') as fout:
                 for k,v in self.metadata.items():
                     fout.attrs[k] = v
                 if self.metadata['norm'] == 'gauss':
@@ -130,9 +132,37 @@ class DataTransform:
                 self.inputs = log(self.inputs)
         if self.metadata['norm'] == 'gauss':
             self.inputs = (self.inputs - self.median)/(self.Q3 - self.Q1)
-        elif sefl.metadata['norm'] == 'zero_to_one':
+        elif self.metadata['norm'] == 'zero_to_one':
             self.Min = self.inputs.min()
             self.Max = self.inputs.max()
             self.inputs = (self.inputs - self.Min)/(self.Max - self.Min)
         return self
-                    
+    
+    def _split_train_test(self):
+        idx = arange(0,self.inputs.shape[0])
+        random.shuffle(idx)
+        self.idx = idx
+        self.train_size = int(self.inputs.shape[0]*0.8)
+        #self.test_size = self.inputs.shape[0] - self.train_size
+        return self
+    
+    def get_training_set(self):
+        if not hasattr(self, 'idx'):
+            self._split_train_test()
+        train_inputs = self.inputs[self.idx[:self.train_size],:]
+        train_inputs = torch.Tensor(train_inputs)
+        train_targets = self.targets[self.idx[:self.train_size],:]
+        train_targets = torch.Tensor(train_targets)
+        return CustomDataset(train_inputs, train_targets)
+        
+    def get_testing_set(self):
+        if not hasattr(self, 'idx'):
+            self._split_train_test()
+        test_inputs = self.inputs[self.idx[self.train_size:],:]
+        test_inputs = torch.Tensor(test_inputs)
+        test_targets = self.targets[self.idx[self.train_size:],:]
+        test_targets = torch.Tensor(test_targets)
+        return CustomDataset(test_inputs, test_targets)
+    
+        
+        

@@ -1,4 +1,4 @@
-import torch.utilis.data as data
+import torch.utils.data as data
 
 class CustomDataset(data.Dataset):
     def __init__(self, inputs, targets, input_transform = None, target_transform = None):
