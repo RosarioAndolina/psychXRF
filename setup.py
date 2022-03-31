@@ -7,5 +7,8 @@ setup(name='psychXRF',
     author='Rosario Andolina',
     author_email='andolinarosario@gmail.com',
     packages=['psychXRF'],
-    package_dir={'psychXRF' : 'src'}
-    )
+    package_dir={'psychXRF' : 'src'},
+    entry_points = {
+        'console_scripts' : ['psychxrf=psychXRF.main:main']
+    } 
+)
