@@ -12,8 +12,9 @@ from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
 import h5py
-from numpy import asarray
+from numpy import asarray, arange, zeros
 from sys import exit
+import matplotlib.pyplot as plt
 
 
 # Training settings
@@ -25,6 +26,7 @@ parser.add_argument('--num-epoch', type = int, default = 800, help = 'number of 
 parser.add_argument('--lr', type = float, default = 0.01, help = 'learning rate [0.01]')
 parser.add_argument('--hidden-sizes', nargs = '+', default = [128], help = 'sequence of hidden layer sizes')
 parser.add_argument('--optimizer', type = str, default = 'sgd', help = 'Optimizer. One of "sgd" "adam" [sgd]')
+parser.add_argument('--plot', action = 'store_true', help = 'animated plot with loss results')
 parser.add_argument('--root-dir', type = str, default = f'{join(getenv("HOME"),".psychXRF")}', help = f'root directory to store on [{join(getenv("HOME"),".psychXRF")}]')
 parser.add_argument('--trans-file', type = str, default = f'', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
 parser.add_argument('--model-name', type = str, default = f'', help = 'model name [model_<timestamp>]')
@@ -67,8 +69,8 @@ training_dataloader = DataLoader(train_set, opt.batch_size, pin_memory = True, s
 testing_dataloader = DataLoader(test_set, opt.test_batch_size, pin_memory = True, shuffle = True)
 
 print("###### Building Model ######")
-model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = opt.hidden_sizes).to(device)
-criterion = RMSELoss() #nn.MSELoss()
+model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+criterion = RMSELoss()  #nn.MSELoss()
 r2score = R2Score()
 metadata['criterion'] = criterion._get_name()
 
@@ -127,26 +129,55 @@ def checkpoint(epoch):
         torch.save(model, model_file)
         print(f'Checkpoint saved to {model_file}')
 
-def plot_result():
-    pass
+def plot_results(train_loss, test_loss):
+    fig, ax = plt.subplots()
+    x = arange(len(train_loss))
+    ax.plot(x, train_loss, label = 'Train Loss')
+    ax.plot(x, test_loss, label = 'Test Loss')
+    ax.legend()
+    plt.show()
+    
 
 def main():
-    train_loss = []
-    test_loss = []
-    for epoch in range(1, opt.num_epoch + 1):
-        train_loss.append(train(epoch))
-        test_loss.append(test(epoch))
+    train_loss = zeros((opt.num_epoch))
+    test_loss = zeros((opt.num_epoch))
+    trainL = train(1)
+    testL = test(1)
+    max_loss = max(trainL, testL)
+    train_loss[0] = trainL
+    test_loss[0] = testL
+    if opt.plot:
+        plt.ion()
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, opt.num_epoch)
+        ax.set_ylim(0, max_loss)
+        x = arange(opt.num_epoch)
+        train_line, = ax.plot(x, train_loss, label = 'Train Loss')
+        test_line, = ax.plot(x, test_loss, label = 'Test Loss')
+        ax.legend()
+    for epoch in range(2, opt.num_epoch + 1):
+        train_loss[epoch-1] = train(epoch)
+        test_loss[epoch-1] = test(epoch)
         checkpoint(epoch)
+        # plot results
+        if opt.plot:
+            train_line.set_ydata(train_loss)
+            test_line.set_ydata(test_loss)
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
     train_loss = asarray(train_loss)
     test_loss = asarray(test_loss)
-    with h5py.File(join(model_dir, f'{model_name}_loss.h5'), 'w') as fout:
+    loss_fname = join(model_dir, f'{model_name}_loss.h5')
+    print(f'Saving loss file {loss_fname}')
+    with h5py.File(loss_fname, 'w') as fout:
         for k, v in metadata.items():
             fout.attrs[k] = v
         dataset = fout.create_dataset('train_loss', data = train_loss)
         dataset = fout.create_dataset('test_loss', data = test_loss)
-        
     print("##### DONE #####")
-    # plot_resutls
+    plt.ioff()
+    plt.show()
+    # plot_results(train_loss, test_loss)
 
 if __name__ == '__main__':
     main()
