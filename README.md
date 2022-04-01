@@ -4,16 +4,16 @@ Predict synthetic multichannel XRF spectra simulation parameters
 # Installation
 pip install --user .
 
-# Usage
+# Usage:
+## Train
 ```console
-psychxrf [-h] --h5datafile H5DATAFILE [--batch-size BATCH_SIZE] [--test-batch-size TEST_BATCH_SIZE] 
-                [--num-epoch NUM_EPOCH] [--lr LR] [--hidden-sizes HIDDEN_SIZES [HIDDEN_SIZES ...]] 
-                [--optimizer OPTIMIZER] [--trans-file TRANS_FILE]
+psychxrf [-h] --h5data H5DATA [--batch-size BATCH_SIZE] [--test-batch-size TEST_BATCH_SIZE] [--num-epoch NUM_EPOCH] 
+         [--lr LR] [--hidden-sizes HIDDEN_SIZES [HIDDEN_SIZES ...]] [--optimizer OPTIMIZER] [--root-dir ROOT_DIR]
+         [--trans-file TRANS_FILE] [--model-name MODEL_NAME]
 
 options:
   -h, --help            show this help message and exit
-  --h5datafile H5DATAFILE
-                        HDF5 data file
+  --h5data H5DATA       HDF5 data file to train from
   --batch-size BATCH_SIZE
                         training batch size [64]
   --test-batch-size TEST_BATCH_SIZE
@@ -25,7 +25,10 @@ options:
                         sequence of hidden layer sizes
   --optimizer OPTIMIZER
                         Optimizer. One of "sgd" "adam" [sgd]
+  --root-dir ROOT_DIR   root directory to store on [/home/<user>/.psychXRF]
   --trans-file TRANS_FILE
-                        HDF5 file were inputs & targets transformation parameters are stored
-
+                        HDF5 file were inputs & targets transformation parameters
+                        are stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]
+  --model-name MODEL_NAME
+                        model name [model_<timestamp>]
 ```
