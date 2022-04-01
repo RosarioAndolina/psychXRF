@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+from argparse import RawTextHelpFormatter
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,27 +8,58 @@ from torch.utils.data import DataLoader
 from .model import MPL
 from .data import DataProcessing, DataTransform
 from .metrics import R2Score, AR2Score, RMSELoss
-from os import getenv
+from os import getenv, makedirs
+from os.path import join, exists, basename
+from time import localtime
+import h5py
+from numpy import asarray
+from sys import exit
 
 
 # Training settings
-parser = argparse.ArgumentParser('psychxrf')
-parser.add_argument('--h5datafile', type = str, required = True, help = 'HDF5 data file')
+parser = argparse.ArgumentParser('psychxrf', formatter_class = RawTextHelpFormatter)
+parser.add_argument('--h5data', type = str, required = True, help = 'HDF5 data file to train from')
 parser.add_argument('--batch-size', type = int, default = 64, help = 'training batch size [64]')
 parser.add_argument('--test-batch-size', type = int, default = 32, help = 'testing batch size [32]')
 parser.add_argument('--num-epoch', type = int, default = 800, help = 'number of epoch to train for [800]')
 parser.add_argument('--lr', type = float, default = 0.01, help = 'learning rate [0.01]')
 parser.add_argument('--hidden-sizes', nargs = '+', default = [128], help = 'sequence of hidden layer sizes')
 parser.add_argument('--optimizer', type = str, default = 'sgd', help = 'Optimizer. One of "sgd" "adam" [sgd]')
-parser.add_argument('--trans-file', type = str, default = f'/home/{getenv("USER")}/test_transform_file.h5', help = 'HDF5 file were inputs & targets transformation parameters are stored')
+parser.add_argument('--root-dir', type = str, default = f'{join(getenv("HOME"),".psychXRF")}', help = f'root directory to store on [{join(getenv("HOME"),".psychXRF")}]')
+parser.add_argument('--trans-file', type = str, default = f'', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
+parser.add_argument('--model-name', type = str, default = f'', help = 'model name [model_<timestamp>]')
 
 opt = parser.parse_args()
+metadata = {}
+
+lt = localtime()
+timestamp = f'{lt.tm_mday}-{lt.tm_mon}-{lt.tm_year}_{lt.tm_hour}-{lt.tm_min}-{lt.tm_sec}'
+model_name = opt.model_name if opt.model_name else f'model_{timestamp}'
+model_dir = join(opt.root_dir, 'models', model_name)
+makedirs(model_dir, exist_ok = True)
+metadata['timestamp'] = timestamp
+metadata['model_name'] = model_name
+metadata['model_dir'] = model_dir
+
+transform_dir = join(opt.root_dir, 'transforms')
+makedirs(transform_dir, exist_ok = True)
+transform_file = opt.trans_file if opt.trans_file else join(transform_dir, f'{basename(opt.h5data).replace(".h5","")}_trans.h5')
+metadata['transform_file'] = transform_file
+metadata['leaning_rate'] = opt.lr
+metadata['train_data'] = opt.h5data
+metadata['batch_size'] = opt.batch_size
+metadata['test_batch_size'] = opt.test_batch_size
+metadata['hidden_sizes'] = opt.hidden_sizes
+metadata['optimizer'] = opt.optimizer
+
+config_dir = join(opt.root_dir, 'configs')
+# makedirs(config_dir, exist_ok = True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print("###### LOADING DATASETS ######")
-dproc = DataProcessing().load_h5_data(opt.h5datafile)
-dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), transform_file = opt.trans_file)
+dproc = DataProcessing().load_h5_data(opt.h5data)
+dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), transform_file = transform_file)
 dtrans.input_transform()
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
@@ -38,6 +70,7 @@ print("###### Building Model ######")
 model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = opt.hidden_sizes).to(device)
 criterion = RMSELoss() #nn.MSELoss()
 r2score = R2Score()
+metadata['criterion'] = criterion._get_name()
 
 if opt.optimizer == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr = opt.lr)
@@ -45,6 +78,8 @@ elif opt.optimizer == 'adam':
     optimizer = optim.Adam(model.parameters(), lr = opt.lr)
 else:
     raise ValueError('Unused optimizer')
+metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
+
 print(model)
 
 def train(epoch):
@@ -86,7 +121,13 @@ def test(epoch):
     
             
 
-def checkpoint():
+def checkpoint(epoch):
+    model_file = join(model_dir, f'{model_name}_epoch{epoch}.pt')
+    if (epoch % 50 == 0):
+        torch.save(model, model_file)
+        print(f'Checkpoint saved to {model_file}')
+
+def plot_result():
     pass
 
 def main():
@@ -95,8 +136,17 @@ def main():
     for epoch in range(1, opt.num_epoch + 1):
         train_loss.append(train(epoch))
         test_loss.append(test(epoch))
-        # to do: train and test loss plot
+        checkpoint(epoch)
+    train_loss = asarray(train_loss)
+    test_loss = asarray(test_loss)
+    with h5py.File(join(model_dir, f'{model_name}_loss.h5'), 'w') as fout:
+        for k, v in metadata.items():
+            fout.attrs[k] = v
+        dataset = fout.create_dataset('train_loss', data = train_loss)
+        dataset = fout.create_dataset('test_loss', data = test_loss)
+        
     print("##### DONE #####")
+    # plot_resutls
 
 if __name__ == '__main__':
     main()
