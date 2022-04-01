@@ -8,8 +8,8 @@ pip install --user .
 ## Train
 ```console
 psychxrf [-h] --h5data H5DATA [--batch-size BATCH_SIZE] [--test-batch-size TEST_BATCH_SIZE] [--num-epoch NUM_EPOCH] 
-         [--lr LR] [--hidden-sizes HIDDEN_SIZES [HIDDEN_SIZES ...]] [--optimizer OPTIMIZER] [--root-dir ROOT_DIR]
-         [--trans-file TRANS_FILE] [--model-name MODEL_NAME]
+         [--lr LR] [--hidden-sizes HIDDEN_SIZES [HIDDEN_SIZES ...]] [--optimizer OPTIMIZER] [--plot]
+         [--root-dir ROOT_DIR] [--trans-file TRANS_FILE] [--model-name MODEL_NAME]
 
 options:
   -h, --help            show this help message and exit
@@ -25,6 +25,7 @@ options:
                         sequence of hidden layer sizes
   --optimizer OPTIMIZER
                         Optimizer. One of "sgd" "adam" [sgd]
+  --plot                animated plot with loss results
   --root-dir ROOT_DIR   root directory to store on [/home/<user>/.psychXRF]
   --trans-file TRANS_FILE
                         HDF5 file were inputs & targets transformation parameters
