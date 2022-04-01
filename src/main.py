@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from .model import MPL
 from .data import DataProcessing, DataTransform
+from .metrics import R2Score, AR2Score, RMSELoss
 from os import getenv
 
 
@@ -30,23 +31,72 @@ dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), tran
 dtrans.input_transform()
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
-training_dataloader = DataLoader(train_set, opt.batch_size, shuffle = True)
-testing_dataloader = DataLoader(test_set, opt.test_batch_size, shuffle = True)
+training_dataloader = DataLoader(train_set, opt.batch_size, pin_memory = True, shuffle = True)
+testing_dataloader = DataLoader(test_set, opt.test_batch_size, pin_memory = True, shuffle = True)
 
 print("###### Building Model ######")
-model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = opt.hidden_sizes)
-criterion = nn.MSELoss()
+model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = opt.hidden_sizes).to(device)
+criterion = RMSELoss() #nn.MSELoss()
+r2score = R2Score()
 
 if opt.optimizer == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr = opt.lr)
 elif opt.optimizer == 'adam':
     optimizer = optim.Adam(model.parameters(), lr = opt.lr)
 else:
-    raise ValueError('Unutilized optimizer')
+    raise ValueError('Unused optimizer')
 print(model)
 
+def train(epoch):
+    epoch_loss = 0
+    for iteration, batch in enumerate(training_dataloader,1):
+        input , target = batch[0].to(device), batch[1].to(device)
+        optimizer.zero_grad()
+        loss = criterion(model(input), target)
+        epoch_loss += loss.item()
+        loss.backward()
+        optimizer.step()
+        
+        #print(f"Epoch [{epoch} ({iteration}/{len(training_dataloader)})]: Loss: {loss.item():.4f}")
+    if (epoch % 50 == 0):
+        print(f"##### Epoch {epoch} Completed: avg. Loss: {(epoch_loss/len(training_dataloader)):.4f}")
+    return epoch_loss/len(training_dataloader)
+
+def test(epoch):
+    mean_loss = 0
+    mean_metric = 0
+    with torch.no_grad():
+        for batch in testing_dataloader:
+            input, target = batch[0].to(device), batch[1].to(device)
+
+            prediction = model(input)
+            loss = criterion(prediction, target)
+            metric = r2score(prediction, target)
+            mean_loss += loss.item()
+            mean_metric += metric.item()
+    mean_loss = mean_loss/len(testing_dataloader)
+    mean_metric = mean_metric/len(testing_dataloader)
+    #adjusted r2score
+    ar2score = AR2Score(input.shape[0], input.shape[1], mean_metric)
+    if (epoch % 50 == 0):
+        print(f"##### Test Loss: {mean_loss:.4f}")
+        print(f"##### Test R2: {mean_metric:.4f}")
+        print(f"##### Test Adjusted R2: {ar2score:.4f}")
+    return mean_loss
+    
+            
+
+def checkpoint():
+    pass
+
 def main():
-    print("training...")
+    train_loss = []
+    test_loss = []
+    for epoch in range(1, opt.num_epoch + 1):
+        train_loss.append(train(epoch))
+        test_loss.append(test(epoch))
+        # to do: train and test loss plot
+    print("##### DONE #####")
 
 if __name__ == '__main__':
     main()
