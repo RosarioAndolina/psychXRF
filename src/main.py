@@ -54,7 +54,7 @@ metadata['test_batch_size'] = opt.test_batch_size
 metadata['hidden_sizes'] = opt.hidden_sizes
 metadata['optimizer'] = opt.optimizer
 
-config_dir = join(opt.root_dir, 'configs')
+config_dir = join(opt.root_dir, 'config')
 # makedirs(config_dir, exist_ok = True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -151,6 +151,7 @@ def main():
         fig, ax = plt.subplots()
         ax.set_xlim(0, opt.num_epoch)
         ax.set_ylim(0, max_loss)
+        ax.set_title(f'Model {model_name}')
         x = arange(opt.num_epoch)
         train_line, = ax.plot(x, train_loss, label = 'Train Loss')
         test_line, = ax.plot(x, test_loss, label = 'Test Loss')
@@ -165,8 +166,8 @@ def main():
             test_line.set_ydata(test_loss)
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
-    train_loss = asarray(train_loss)
-    test_loss = asarray(test_loss)
+    # train_loss = asarray(train_loss)
+    # test_loss = asarray(test_loss)
     loss_fname = join(model_dir, f'{model_name}_loss.h5')
     print(f'Saving loss file {loss_fname}')
     with h5py.File(loss_fname, 'w') as fout:
@@ -175,8 +176,9 @@ def main():
         dataset = fout.create_dataset('train_loss', data = train_loss)
         dataset = fout.create_dataset('test_loss', data = test_loss)
     print("##### DONE #####")
-    plt.ioff()
-    plt.show()
+    if opt.plot:
+        plt.ioff()
+        plt.show()
     # plot_results(train_loss, test_loss)
 
 if __name__ == '__main__':
