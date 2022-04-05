@@ -30,6 +30,7 @@ parser.add_argument('--plot', action = 'store_true', help = 'animated plot with 
 parser.add_argument('--root-dir', type = str, default = f'{join(getenv("HOME"),".psychXRF")}', help = f'root directory to store on [{join(getenv("HOME"),".psychXRF")}]')
 parser.add_argument('--trans-file', type = str, default = f'', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
 parser.add_argument('--model-name', type = str, default = f'', help = 'model name [model_<timestamp>]')
+parser.add_argument('--model', type = str, default = '', help = 'model to load')
 
 opt = parser.parse_args()
 metadata = {}
@@ -69,19 +70,21 @@ training_dataloader = DataLoader(train_set, opt.batch_size, pin_memory = True, s
 testing_dataloader = DataLoader(test_set, opt.test_batch_size, pin_memory = True, shuffle = True)
 
 print("###### Building Model ######")
-model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
-criterion = RMSELoss()  #nn.MSELoss()
-r2score = R2Score()
-metadata['criterion'] = criterion._get_name()
-
-if opt.optimizer == 'sgd':
-    optimizer = optim.SGD(model.parameters(), lr = opt.lr)
-elif opt.optimizer == 'adam':
-    optimizer = optim.Adam(model.parameters(), lr = opt.lr)
+if opt.model:
+    model = torch.load(opt.module).to(device)
+    # we need a class
 else:
-    raise ValueError('Unused optimizer')
-metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
-
+    model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+    criterion = RMSELoss()  #nn.MSELoss()
+    metadata['criterion'] = criterion._get_name()
+    if opt.optimizer == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr = opt.lr)
+    elif opt.optimizer == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr = opt.lr)
+    else:
+        raise ValueError('Unused optimizer')
+    metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
+r2score = R2Score()
 print(model)
 
 def train(epoch):
