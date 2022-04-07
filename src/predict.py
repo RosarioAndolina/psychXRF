@@ -16,6 +16,7 @@ class psychXRF:
         self.h5_inputs_data = h5_inputs_data
         with h5py.File(self.h5_inputs_data, 'r') as fin:
             self.inputs = fin['inputs'][:]
+        return self
     
     def sample_inputs_from_tiff(tiff_dir, labels):
         pass

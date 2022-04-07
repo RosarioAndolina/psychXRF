@@ -5,14 +5,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from .model import MPL
+from .model import MFreluSmax, MFreluWfNorm, MCreluWfNorm, MSplitOut01, MSplitOut02, MSplitOut03, MSplitOut04
 from .data import DataProcessing, DataTransform
 from .metrics import R2Score, AR2Score, RMSELoss
 from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
 import h5py
-from numpy import asarray, arange, zeros
+from numpy import asarray, arange, zeros, median, sqrt
 from sys import exit
 import matplotlib.pyplot as plt
 
@@ -60,10 +60,20 @@ config_dir = join(opt.root_dir, 'config')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def normalize(targets, split_point = 2):
+    n = lambda x: x/x.max()
+    for i in range(split_point):
+        targets[:,i] = n(targets[:,i])
+    targets[:, split_point:] = targets[:, split_point:]/100.
+    return targets
+    
+
 print("###### LOADING DATASETS ######")
 dproc = DataProcessing().load_h5_data(opt.h5data)
 dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), transform_file = transform_file)
 dtrans.input_transform()
+dtrans.target_transform = normalize
+
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
 training_dataloader = DataLoader(train_set, opt.batch_size, pin_memory = True, shuffle = True)
@@ -74,9 +84,12 @@ if opt.model:
     model = torch.load(opt.module).to(device)
     # we need a class
 else:
-    model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
-    criterion = RMSELoss()  #nn.MSELoss()
-    metadata['criterion'] = criterion._get_name()
+    #model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+    model = MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+    rl_criterion = nn.MSELoss()
+    sl_criterion = nn.MSELoss()
+    wf_criterion = nn.MSELoss()
+    metadata['criterion'] = [rl_criterion._get_name(), sl_criterion._get_name(), wf_criterion._get_name()]
     if opt.optimizer == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr = opt.lr)
     elif opt.optimizer == 'adam':
@@ -88,41 +101,76 @@ r2score = R2Score()
 print(model)
 
 def train(epoch):
+    epoch_rl_loss = 0
+    epoch_sl_loss = 0
+    epoch_wf_loss = 0
     epoch_loss = 0
     for iteration, batch in enumerate(training_dataloader,1):
         input , target = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
-        loss = criterion(model(input), target)
+        rl_out, sl_out, wf_out = model(input)
+        rl_loss = rl_criterion(rl_out, target[:, 0])
+        sl_loss = sl_criterion(sl_out, target[:, 1])
+        wf_loss = wf_criterion(wf_out, target[:, 2:])
+        epoch_rl_loss += rl_loss.item()
+        epoch_sl_loss += sl_loss.item()
+        epoch_wf_loss += wf_loss.item()
+        loss = (rl_loss*20 + sl_loss*10 + wf_loss*3)/(20+10+3)
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
         
         #print(f"Epoch [{epoch} ({iteration}/{len(training_dataloader)})]: Loss: {loss.item():.4f}")
     if (epoch % 50 == 0):
-        print(f"##### Epoch {epoch} Completed: avg. Loss: {(epoch_loss/len(training_dataloader)):.4f}")
-    return epoch_loss/len(training_dataloader)
+        epoch_loss = epoch_loss/len(training_dataloader)
+        epoch_rl_loss = epoch_rl_loss/len(training_dataloader)
+        epoch_sl_loss = epoch_sl_loss/len(training_dataloader)
+        epoch_wf_loss = epoch_wf_loss/len(training_dataloader)
+        print(f"##### Epoch {epoch} Completed: avg. Loss: {epoch_loss:.4f}")
+        print(f"      avg. reflayer Loss: {epoch_rl_loss:.4f}")
+        print(f"      avg. sublayer Loss: {epoch_sl_loss:.4f}")
+        print(f"      avg. weigh fractions Loss: {epoch_wf_loss:.4f}\n")
+    return epoch_rl_loss, epoch_sl_loss, epoch_wf_loss, epoch_loss
 
 def test(epoch):
     mean_loss = 0
+    mean_rl_loss = 0
+    mean_sl_loss = 0
+    mean_wf_loss = 0
     mean_metric = 0
     with torch.no_grad():
         for batch in testing_dataloader:
             input, target = batch[0].to(device), batch[1].to(device)
 
             prediction = model(input)
-            loss = criterion(prediction, target)
-            metric = r2score(prediction, target)
+            rl_loss = rl_criterion(prediction[0], target[:,0])
+            sl_loss = sl_criterion(prediction[1], target[:,1])
+            wf_loss = wf_criterion(prediction[2], target[:, 2:])
+            loss = (rl_loss + sl_loss + wf_loss)/3.
+            rl_metric = r2score(prediction[0], target[:,0])
+            sl_metric = r2score(prediction[1], target[:,1])
+            wf_metric = r2score(prediction[2], target[:,2:])
+            metric = (rl_metric + sl_metric + wf_metric)/3.
+            mean_rl_loss += rl_loss.item()
+            mean_sl_loss += sl_loss.item()
+            mean_wf_loss += wf_loss.item()
             mean_loss += loss.item()
             mean_metric += metric.item()
     mean_loss = mean_loss/len(testing_dataloader)
+    mean_rl_loss = mean_rl_loss/len(testing_dataloader)
+    mean_sl_loss = mean_sl_loss/len(testing_dataloader)
+    mean_wf_loss = mean_wf_loss/len(testing_dataloader)
     mean_metric = mean_metric/len(testing_dataloader)
     #adjusted r2score
     ar2score = AR2Score(input.shape[0], input.shape[1], mean_metric)
     if (epoch % 50 == 0):
         print(f"##### Test Loss: {mean_loss:.4f}")
+        print(f"      Test reflayer Loss: {mean_rl_loss:.4f}")
+        print(f"      Test sublayer Loss: {mean_sl_loss:.4f}")
+        print(f"      Test weith fraction Loss: {mean_wf_loss:.4f}")
         print(f"##### Test R2: {mean_metric:.4f}")
         print(f"##### Test Adjusted R2: {ar2score:.4f}")
-    return mean_loss
+    return mean_rl_loss, mean_sl_loss, mean_wf_loss, mean_loss
     
             
 
@@ -142,31 +190,37 @@ def plot_results(train_loss, test_loss):
     
 
 def main():
-    train_loss = zeros((opt.num_epoch))
-    test_loss = zeros((opt.num_epoch))
+    train_loss = zeros((4,opt.num_epoch))
+    test_loss = zeros((4, opt.num_epoch))
     trainL = train(1)
     testL = test(1)
-    max_loss = max(trainL, testL)
-    train_loss[0] = trainL
-    test_loss[0] = testL
+    max_loss = max(testL)
+    train_loss[:,0] = asarray(trainL)
+    test_loss[:,0] = asarray(testL)
     if opt.plot:
         plt.ion()
         fig, ax = plt.subplots()
         ax.set_xlim(0, opt.num_epoch)
         ax.set_ylim(0, max_loss)
-        ax.set_title(f'Model {model_name}')
+        ax.set_title(f'Model {model_name}\ntesting set loss')
         x = arange(opt.num_epoch)
-        train_line, = ax.plot(x, train_loss, label = 'Train Loss')
-        test_line, = ax.plot(x, test_loss, label = 'Test Loss')
+        test_line_rl, = ax.plot(x, test_loss[0], label = 'reference layer')
+        test_line_sl, = ax.plot(x, test_loss[1], label = 'sublayer')
+        test_line_wf, = ax.plot(x, test_loss[2], label = 'weight fractions')
+        test_line_total, = ax.plot(x, test_loss[3], label = 'mean')
+        # test_line, = ax.plot(x, test_loss, label = 'Test Loss')
         ax.legend()
     for epoch in range(2, opt.num_epoch + 1):
-        train_loss[epoch-1] = train(epoch)
-        test_loss[epoch-1] = test(epoch)
+        train_loss[:, epoch-1] = train(epoch)
+        test_loss[:, epoch-1] = test(epoch)
         checkpoint(epoch)
         # plot results
         if opt.plot:
-            train_line.set_ydata(train_loss)
-            test_line.set_ydata(test_loss)
+            # train_line.set_ydata(train_loss)
+            test_line_rl.set_ydata(test_loss[0])
+            test_line_sl.set_ydata(test_loss[1])
+            test_line_wf.set_ydata(test_loss[2])
+            test_line_total.set_ydata(test_loss[3])
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
     # train_loss = asarray(train_loss)

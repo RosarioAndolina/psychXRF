@@ -83,6 +83,7 @@ class DataTransform:
         self.inputs = inputs
         self.targets = targets
         self.transform_file = transform_file
+        self.target_transform = None
         
     def load_transform_info(self, transform_file):
         self.metadata = {}
@@ -153,7 +154,7 @@ class DataTransform:
         train_inputs = torch.Tensor(train_inputs)
         train_targets = self.targets[self.idx[:self.train_size],:]
         train_targets = torch.Tensor(train_targets)
-        return CustomDataset(train_inputs, train_targets)
+        return CustomDataset(train_inputs, train_targets, target_transform = self.target_transform)
         
     def get_testing_set(self):
         if not hasattr(self, 'idx'):
@@ -162,7 +163,7 @@ class DataTransform:
         test_inputs = torch.Tensor(test_inputs)
         test_targets = self.targets[self.idx[self.train_size:],:]
         test_targets = torch.Tensor(test_targets)
-        return CustomDataset(test_inputs, test_targets)
+        return CustomDataset(test_inputs, test_targets, target_transform = self.target_transform)
     
         
         
