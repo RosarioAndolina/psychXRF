@@ -190,23 +190,49 @@ def checkpoint(epoch):
         torch.save(model, model_file)
         print(f'Checkpoint saved to {model_file}')
 
-def plot_results(train_loss, test_loss):
-    fig, ax = plt.subplots()
-    x = arange(len(train_loss))
-    ax.plot(x, train_loss, label = 'Train Loss')
-    ax.plot(x, test_loss, label = 'Test Loss')
-    ax.legend()
-    plt.show()
+def plot_results(best_checkpoint):
+    checkpoint_paths = [
+        join(model_dir, f"{model_name}_epoch{best_checkpoint[i]}.pt")
+        for i in range(3)
+    ]
+    models = [torch.load(x).to('cpu') for x in checkpoint_paths]
+    with torch.no_grad():
+        inputs = test_set[:][0]
+        targets = test_set[:][1]
+        predictions = [
+            m(inputs)[i] for i, m in enumerate(models)
+        ]
+    # set axis limits
+    # add ideal line
+    fig, ax = plt.subplots(1,2)
+    ax[0].scatter(targets[:, 0], predictions[0])
+    ax[0].set_title("reflayer prediction vs target\nnormalized")
+    ax[0].set_xlabel("targets")
+    ax[0].set_ylabel("prediction")
     
+    ax[1].scatter(targets[:, 1], predictions[1])
+    ax[1].set_title("sublayer prediction vs target\nnormallized")
+    ax[1].set_xlabel("targets")
+    ax[1].set_ylabel("prediction")
+    
+    fig, ax = plt.subplots(2,2)
+    for i in range(2):
+        for j in range(2):
+            ax[i,j].scatter(targets[:, 2:][j::2][i], predictions[2][j::2][i])
+            ax[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::2][i]} weight fraction\ntransformed")
+            ax[i,j].set_xlabel("targets")
+            ax[i,j].set_ylabel("prediction")
+    plt.show()
+        
 
 def main():
-    train_loss = zeros((4,opt.num_epoch))
-    test_loss = zeros((4, opt.num_epoch))
+    train_loss = torch.zeros((4,opt.num_epoch))
+    test_loss = torch.zeros((4, opt.num_epoch))
     trainL = train(1)
     testL = test(1)
     max_loss = max(testL)
-    train_loss[:,0] = asarray(trainL)
-    test_loss[:,0] = asarray(testL)
+    train_loss[:,0] = torch.tensor(trainL)
+    test_loss[:,0] = torch.tensor(testL)
     if opt.plot:
         plt.ion()
         fig, ax = plt.subplots()
@@ -214,28 +240,31 @@ def main():
         ax.set_ylim(0, max_loss)
         ax.set_title(f'Model {model_name}\ntesting set loss')
         x = arange(opt.num_epoch)
-        test_line_rl, = ax.plot(x, test_loss[0], label = 'reference layer')
-        test_line_sl, = ax.plot(x, test_loss[1], label = 'sublayer')
-        test_line_wf, = ax.plot(x, test_loss[2], label = 'weight fractions')
-        test_line_total, = ax.plot(x, test_loss[3], label = 'mean')
+        test_line_rl, = ax.plot(x, test_loss[0].numpy(), label = 'reference layer')
+        test_line_sl, = ax.plot(x, test_loss[1].numpy(), label = 'sublayer')
+        test_line_wf, = ax.plot(x, test_loss[2].numpy(), label = 'weight fractions')
+        test_line_total, = ax.plot(x, test_loss[3].numpy(), label = 'mean')
         # test_line, = ax.plot(x, test_loss, label = 'Test Loss')
         ax.legend()
         print(f"\n\nTraining model {model_name}")
     for epoch in range(2, opt.num_epoch + 1):
-        train_loss[:, epoch-1] = train(epoch)
-        test_loss[:, epoch-1] = test(epoch)
+        train_loss[:, epoch-1] = torch.tensor(train(epoch))
+        test_loss[:, epoch-1] = torch.tensor(test(epoch))
         checkpoint(epoch)
         # plot results
         if opt.plot:
             # train_line.set_ydata(train_loss)
-            test_line_rl.set_ydata(test_loss[0])
-            test_line_sl.set_ydata(test_loss[1])
-            test_line_wf.set_ydata(test_loss[2])
-            test_line_total.set_ydata(test_loss[3])
+            test_line_rl.set_ydata(test_loss[0].numpy())
+            test_line_sl.set_ydata(test_loss[1].numpy())
+            test_line_wf.set_ydata(test_loss[2].numpy())
+            test_line_total.set_ydata(test_loss[3].numpy())
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
     # train_loss = asarray(train_loss)
     # test_loss = asarray(test_loss)
+    checkpoint_index = (torch.arange(10, opt.num_epoch + 1, 10)[1:]) - 1
+    best_test_loss = (test_loss[:, checkpoint_index].min(dim = 1).indices + 1) *10
+    metadata['best_checkpoint'] = best_test_loss.numpy()
     loss_fname = join(model_dir, f'{model_name}_loss.h5')
     print(f'Saving loss file {loss_fname}')
     with h5py.File(loss_fname, 'w') as fout:
@@ -247,7 +276,7 @@ def main():
     if opt.plot:
         plt.ioff()
         plt.show()
-    # plot_results(train_loss, test_loss)
+    plot_results(metadata['best_checkpoint'])
 
 if __name__ == '__main__':
     main()
