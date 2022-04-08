@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 import psychXRF.model as Model
 #from .model import MFreluSmax, MFreluWfNorm, MCreluWfNorm, MSplitOut01, MSplitOut02, MSplitOut03, MSplitOut04
 from .data import DataProcessing, DataTransform
-from .metrics import R2Score, AR2Score, RMSELoss
+from .metrics import R2Score, AR2Score
+import psychXRF.metrics as Metrics
 from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
@@ -92,10 +93,10 @@ else:
     model = Model.MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
 if hasattr(nn, opt.criterion):
     criterion = getattr(nn, opt.criterion)
-elif hasattr(metrics, opt.criterion):
-    criterion = getattr(metrics, opt.criterion)
+elif hasattr(Metrics, opt.criterion):
+    criterion = getattr(Metrics, opt.criterion)
 else:
-    raise ValueError(f"Criterion {op.criterion} not found")
+    raise ValueError(f"Criterion {opt.criterion} not found")
 rl_criterion = criterion() #nn.MSELoss()    
 sl_criterion = criterion() #nn.MSELoss()
 wf_criterion = criterion() #nn.MSELoss()
