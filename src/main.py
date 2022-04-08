@@ -93,13 +93,12 @@ rl_criterion = nn.MSELoss()
 sl_criterion = nn.MSELoss()
 wf_criterion = nn.MSELoss()
 metadata['criterion'] = [rl_criterion._get_name(), sl_criterion._get_name(), wf_criterion._get_name()]
-if opt.optimizer == 'sgd':
-    optimizer = optim.SGD(model.parameters(), lr = opt.lr)
-elif opt.optimizer == 'adam':
-    optimizer = optim.Adam(model.parameters(), lr = opt.lr)
+if hasattr(optim, opt.optimizer):
+    _optim = getattr(optim, opt.optimizer)
 else:
-    raise ValueError('Unused optimizer')
-metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
+    raise ValueError(f"Optimizer {opt.optimizer} not found in torch.optim")
+optimizer = _optim(model.parameters(), lr = opt.lr)
+metadata['optimizer'] = opt.optimizer
 r2score = R2Score()
 print(model)
 
