@@ -27,6 +27,7 @@ parser.add_argument('--num-epoch', type = int, default = 800, help = 'number of 
 parser.add_argument('--lr', type = float, default = 0.01, help = 'learning rate [0.01]')
 parser.add_argument('--hidden-sizes', nargs = '+', default = [128], help = 'sequence of hidden layer sizes')
 parser.add_argument('--optimizer', type = str, default = 'SDG', help = 'Optimizer')
+parser.add_argument('--criterion', type = str, default = 'MSELoss', help = 'Loss function')
 parser.add_argument('--plot', action = 'store_true', help = 'animated plot with loss results')
 parser.add_argument('--root-dir', type = str, default = f'{join(getenv("HOME"),".psychXRF")}', help = f'root directory to store on [{join(getenv("HOME"),".psychXRF")}]')
 parser.add_argument('--trans-file', type = str, default = '', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
@@ -89,9 +90,15 @@ if opt.model:
     model = _model(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
 else:
     model = Model.MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
-rl_criterion = nn.MSELoss()
-sl_criterion = nn.MSELoss()
-wf_criterion = nn.MSELoss()
+if hasattr(nn, opt.criterion):
+    criterion = getattr(nn, opt.criterion)
+elif hasattr(metrics, opt.criterion):
+    criterion = getattr(metrics, opt.criterion)
+else:
+    raise ValueError(f"Criterion {op.criterion} not found")
+rl_criterion = criterion() #nn.MSELoss()    
+sl_criterion = criterion() #nn.MSELoss()
+wf_criterion = criterion() #nn.MSELoss()
 metadata['criterion'] = [rl_criterion._get_name(), sl_criterion._get_name(), wf_criterion._get_name()]
 if hasattr(optim, opt.optimizer):
     _optim = getattr(optim, opt.optimizer)
