@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from .model import MFreluSmax, MFreluWfNorm, MCreluWfNorm, MSplitOut01, MSplitOut02, MSplitOut03, MSplitOut04
+import psychXRF.model as Model
+#from .model import MFreluSmax, MFreluWfNorm, MCreluWfNorm, MSplitOut01, MSplitOut02, MSplitOut03, MSplitOut04
 from .data import DataProcessing, DataTransform
 from .metrics import R2Score, AR2Score, RMSELoss
 from os import getenv, makedirs
@@ -25,12 +26,13 @@ parser.add_argument('--test-batch-size', type = int, default = 32, help = 'testi
 parser.add_argument('--num-epoch', type = int, default = 800, help = 'number of epoch to train for [800]')
 parser.add_argument('--lr', type = float, default = 0.01, help = 'learning rate [0.01]')
 parser.add_argument('--hidden-sizes', nargs = '+', default = [128], help = 'sequence of hidden layer sizes')
-parser.add_argument('--optimizer', type = str, default = 'sgd', help = 'Optimizer. One of "sgd" "adam" [sgd]')
+parser.add_argument('--optimizer', type = str, default = 'SDG', help = 'Optimizer')
 parser.add_argument('--plot', action = 'store_true', help = 'animated plot with loss results')
 parser.add_argument('--root-dir', type = str, default = f'{join(getenv("HOME"),".psychXRF")}', help = f'root directory to store on [{join(getenv("HOME"),".psychXRF")}]')
-parser.add_argument('--trans-file', type = str, default = f'', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
-parser.add_argument('--model-name', type = str, default = f'', help = 'model name [model_<timestamp>]')
-parser.add_argument('--model', type = str, default = '', help = 'model to load')
+parser.add_argument('--trans-file', type = str, default = '', help = 'HDF5 file were inputs & targets transformation parameters\nare stored [ROOT_DIR/transforms/<H5DATA name>_trans.h5]')
+parser.add_argument('--model-name', type = str, default = '', help = 'model name used to save checkpoints [model_<timestamp>]')
+parser.add_argument('--model', type = str, default = '', help = 'model to train [MSplitOut04]')
+parser.add_argument('--checkpoint', type = str, default = '', help = 'load CHEKPOINT and train (to be implemented)')
 
 opt = parser.parse_args()
 metadata = {}
@@ -73,6 +75,8 @@ dproc = DataProcessing().load_h5_data(opt.h5data)
 dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), transform_file = transform_file)
 dtrans.input_transform()
 dtrans.target_transform = normalize
+metadata['reflayer_thicknes_max'] = dtrans.targets[:, 0].max()
+metadata['sublayer_thicknes_max'] = dtrans.targets[:, 1].max()
 
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
@@ -81,22 +85,21 @@ testing_dataloader = DataLoader(test_set, opt.test_batch_size, pin_memory = True
 
 print("###### Building Model ######")
 if opt.model:
-    model = torch.load(opt.module).to(device)
-    # we need a class
+    _model = getattr(Model, opt.model)
+    model = _model(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
 else:
-    #model = MPL(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
-    model = MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
-    rl_criterion = nn.MSELoss()
-    sl_criterion = nn.MSELoss()
-    wf_criterion = nn.MSELoss()
-    metadata['criterion'] = [rl_criterion._get_name(), sl_criterion._get_name(), wf_criterion._get_name()]
-    if opt.optimizer == 'sgd':
-        optimizer = optim.SGD(model.parameters(), lr = opt.lr)
-    elif opt.optimizer == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr = opt.lr)
-    else:
-        raise ValueError('Unused optimizer')
-    metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
+    model = Model.MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+rl_criterion = nn.MSELoss()
+sl_criterion = nn.MSELoss()
+wf_criterion = nn.MSELoss()
+metadata['criterion'] = [rl_criterion._get_name(), sl_criterion._get_name(), wf_criterion._get_name()]
+if opt.optimizer == 'sgd':
+    optimizer = optim.SGD(model.parameters(), lr = opt.lr)
+elif opt.optimizer == 'adam':
+    optimizer = optim.Adam(model.parameters(), lr = opt.lr)
+else:
+    raise ValueError('Unused optimizer')
+metadata['optimizer'] = (optimizer.__module__).split('.')[-1]
 r2score = R2Score()
 print(model)
 
@@ -176,7 +179,7 @@ def test(epoch):
 
 def checkpoint(epoch):
     model_file = join(model_dir, f'{model_name}_epoch{epoch}.pt')
-    if (epoch % 50 == 0):
+    if (epoch % 10 == 0):
         torch.save(model, model_file)
         print(f'Checkpoint saved to {model_file}')
 
@@ -210,6 +213,7 @@ def main():
         test_line_total, = ax.plot(x, test_loss[3], label = 'mean')
         # test_line, = ax.plot(x, test_loss, label = 'Test Loss')
         ax.legend()
+        print(f"\n\nTraining model {model_name}")
     for epoch in range(2, opt.num_epoch + 1):
         train_loss[:, epoch-1] = train(epoch)
         test_loss[:, epoch-1] = test(epoch)
