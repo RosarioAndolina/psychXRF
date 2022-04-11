@@ -14,7 +14,7 @@ from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
 import h5py
-from numpy import asarray, arange, zeros, median, sqrt
+from numpy import asarray, arange, zeros, median, sqrt, linspace
 from sys import exit
 import matplotlib.pyplot as plt
 
@@ -202,26 +202,36 @@ def plot_results(best_checkpoint):
         predictions = [
             m(inputs)[i] for i, m in enumerate(models)
         ]
-    # set axis limits
-    # add ideal line
+    x = linspace(1e-3,1,10)
     fig, ax = plt.subplots(1,2)
     ax[0].scatter(targets[:, 0], predictions[0])
+    ax[0].plot(x,x, label = "Ideal")
     ax[0].set_title("reflayer prediction vs target\nnormalized")
     ax[0].set_xlabel("targets")
     ax[0].set_ylabel("prediction")
+    ax[0].set_xlim(0,1)
+    ax[0].set_ylim(0,1)
+    ax[0].legend()
     
     ax[1].scatter(targets[:, 1], predictions[1])
+    ax[1].plot(x,x, label = "Ideal")
     ax[1].set_title("sublayer prediction vs target\nnormallized")
     ax[1].set_xlabel("targets")
     ax[1].set_ylabel("prediction")
-    
+    ax[1].set_xlim(0,1)
+    ax[1].set_ylim(0,1)
+    ax[1].legend()
     fig, ax = plt.subplots(2,2)
     for i in range(2):
         for j in range(2):
             ax[i,j].scatter(targets[:, 2:][j::2][i], predictions[2][j::2][i])
+            ax[i,j].plot(x,x, label = "Ideal")
             ax[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::2][i]} weight fraction\ntransformed")
             ax[i,j].set_xlabel("targets")
             ax[i,j].set_ylabel("prediction")
+            ax[i,j].set_xlim(0,1)
+            ax[i,j].set_ylim(0,1)
+            ax[i,j].legend()
     plt.show()
         
 

@@ -160,7 +160,7 @@ class MSplitOut03(MPL):
         super(MSplitOut03, self).__init__(in_size, out_size, hidden_sizes, activation = 'frelu')
         self.split_point = 2
         #activation for thickness
-        self.cfrelu = CFReLU(self.out_size, b = 1.0e-6)
+        self.cfrelu = CFReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
         self.sumNorm = SumNorm(self.out_size - self.split_point, dim = 1)
     
@@ -183,7 +183,7 @@ class MSplitOut04(MPL):
         super(MSplitOut04, self).__init__(in_size, out_size, hidden_sizes, activation = 'tanh')
         self.split_point = 2
         #activation for thickness
-        self.cfrelu = CFReLU(self.out_size, b = 1.0e-6)
+        self.cfrelu = CFReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
         self.sumNorm = SumNorm(self.out_size - self.split_point, dim = 1)
     
