@@ -19,6 +19,16 @@ class RMSELoss(nn.Module):
     def forward(self, pred, actual):
         return torch.sqrt(self.mse(pred, actual))
 
+#Mean absolute percentage error
+class MAPE(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = nn.L1Loss(reduction = 'none')
+    
+    def forward(self, pred, actual):
+        mape = 100 * self.l1(pred, actual)/torch.max(pred,actual)
+        return mape.mean()
+
 #Determination Coefficient
 class R2Score(nn.Module):
     def __init__(self):

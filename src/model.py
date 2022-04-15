@@ -137,7 +137,7 @@ class MSplitOut02(MPL):
         super(MSplitOut02, self).__init__(in_size, out_size, hidden_sizes, activation = 'frelu')
         self.split_point = 2
         #activation for thickness
-        self.brelu = BReLU(self.out_size, b = 1.0e-6)
+        self.brelu = BReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
         self.sumNorm = SumNorm(self.out_size - self.split_point, dim = 1)
     

@@ -27,7 +27,13 @@ class psychXRF:
         else:
             raise ValueError('No inputs yet')
         inputs = torch.Tensor(dtrans.inputs).to(self.device)
-        self.predicted = self.model(inputs).cpu().detach().numpy()
+        predicted = self.model(inputs)
+        if isinstance(predicted, tuple):
+            self.predicted = []
+            for prediction in predicted:
+                self.predicted.append(prediction.cpu().detach().numpy())
+        else:
+            self.predicted = predicted.cpu().detach().numpy()
         return self.predicted
         
         
