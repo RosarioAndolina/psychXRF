@@ -2,7 +2,7 @@
 from distutils.core import setup
 
 setup(name='psychXRF',
-    version='0.4',
+    version='0.5',
     description='Predict synthetic multichannel XRF spectra simulation parameters',
     author='Rosario Andolina',
     author_email='andolinarosario@gmail.com',
