@@ -1,5 +1,6 @@
 from os.path import join, exists, basename, dirname
-from numpy import array, empty, hstack, random, tile, log, quantile, median, arange
+from numpy import array, empty, hstack, random, tile, log, quantile, median, arange, ones
+from numpy.random import rand
 from XRDXRFutils.data import SyntheticDataXRF
 from itertools import combinations
 import h5py
@@ -27,7 +28,7 @@ class DataProcessing:
     def get_peaks_area(spectra, condition):
         areas = spectra[:, condition].sum(axis = 1)
         return areas
-
+    
     def get_inputs_from_ROI(self, ROI = None):
         if not ROI:
             ROI = {"Mn" : [[5.67, 6.1]],
@@ -37,8 +38,8 @@ class DataProcessing:
                    "Ca" : [[3.5, 3.9]]}
         if self.poisson:
             self.data.data = array([random.poisson(self.data.data) for _ in range(self.N)]).reshape(self.shape[0] * self.N, self.shape[1])
-            self.data.reflayer_thicknes = tile(self.data.reflayer_thicknes, self.N)
-            self.data.sublayer_thicknes = tile(self.data.sublayer_thicknes, self.N)
+            self.data.reflayer_thickness = tile(self.data.reflayer_thickness, self.N)
+            self.data.sublayer_thickness = tile(self.data.sublayer_thickness, self.N)
             self.data.weight_fractions = tile(self.data.weight_fractions, (self.N, 1))
             self.shape = self.data.data.shape
         
@@ -58,23 +59,26 @@ class DataProcessing:
             inputs[:,i] = data_dict[c[0]]/data_dict[c[1]]
         return inputs
 
-    def get_inputs_from_labels(self):
+    def get_inputs_from_labels(self, ratios = False):
         symbols = [l.split('-')[0] for l in self.data.metadata['labels']]
         _min = self.data.labels[self.data.labels > 0].min()
-        self.data.labels[self.data.labels == 0.0] = _min * 1.0e-2
-        combo = list(combinations(symbols[1:],2))
-        features_len = len(symbols) - 1 + len(combo)
-        inputs = empty((self.data.labels.shape[0], features_len))
-        for i, l in enumerate(self.data.labels[:,1:].T,0):
-            inputs[:,i] = l/self.data.labels[:,0]
-        for i, c in enumerate(combo, self.data.labels.shape[1] - 1):
-            inputs[:, i] = self.data.labels[:, symbols.index(c[0]) - 1] / self.data.labels[:, symbols.index(c[1]) - 1]
-        return inputs
+        self.data.labels[self.data.labels == 0.0] = _min
+        if ratios:
+            combo = list(combinations(symbols[1:],2))
+            features_len = len(symbols) - 1 + len(combo)
+            inputs = empty((self.data.labels.shape[0], features_len))
+            for i, l in enumerate(self.data.labels[:,1:].T,0):
+                inputs[:,i] = l/self.data.labels[:,0]
+            for i, c in enumerate(combo, self.data.labels.shape[1] - 1):
+                inputs[:, i] = self.data.labels[:, symbols.index(c[0]) - 1] / self.data.labels[:, symbols.index(c[1]) - 1]
+            return inputs
+        else:
+            return self.data.labels
 
     def get_targets(self):
         # convert to micron
-        targets = hstack((self.data.reflayer_thicknes.reshape(self.shape[0],1)*1.0e4,
-                          self.data.sublayer_thicknes.reshape(self.shape[0],1)*1.0e4,
+        targets = hstack((self.data.reflayer_thickness.reshape(self.shape[0],1)*1.0e4,
+                          self.data.sublayer_thickness.reshape(self.shape[0],1)*1.0e4,
                           self.data.weight_fractions))
         return targets
 
@@ -164,6 +168,35 @@ class DataTransform:
         test_targets = self.targets[self.idx[self.train_size:],:]
         test_targets = torch.Tensor(test_targets)
         return CustomDataset(test_inputs, test_targets, target_transform = self.target_transform)
+
+class DataProcessingSF(DataProcessing):
+    def __init__(self, sfbounds = [0.1, 5]):
+        super(DataProcessingSF, self).__init__()
+        self.sfbounds = sfbounds
     
-        
-        
+    def load_h5_data(self, filepath):
+        self = super(DataProcessingSF,self).load_h5_data(filepath)
+        if self.sfbounds == None:
+            self.scale_factor = ones((self.shape[0],1))
+        else:
+            self.scale_factor = self.sfbounds[0] + rand(self.shape[0],1) * (self.sfbounds[1] - self.sfbounds[0])
+        return self
+    
+    def new_scale_factor(self):
+        if self.sfbounds == None:
+            self.scale_factor = ones((self.shape[0],1))
+        else:
+            self.scale_factor = self.sfbounds[0] + rand(self.shape[0],1) * (self.sfbounds[1] - self.sfbounds[0])
+        return self
+    
+    def get_inputs_from_labels(self, ratios = False):
+        inputs = super(DataProcessingSF, self).get_inputs_from_labels(ratios = ratios)
+        return inputs * self.scale_factor
+    
+    def get_targets(self):
+        # convert to micron
+        targets = hstack((self.data.reflayer_thickness.reshape(self.shape[0],1)*1.0e4,
+                          self.data.sublayer_thickness.reshape(self.shape[0],1)*1.0e4,
+                          self.scale_factor,
+                          self.data.weight_fractions))
+        return targets

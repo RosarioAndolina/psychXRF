@@ -35,7 +35,7 @@ class MPL(nn.Module):
 
 class MFreluSmax(MPL):
     """
-    FReLU activated - softmax for weight fractions - CFReLU for thicknes
+    FReLU activated - softmax for weight fractions - CFReLU for thickness
     
     CFReLU: custom FReLU, see activation.py
     """
@@ -56,14 +56,14 @@ class MFreluSmax(MPL):
 
 class MFreluWfNorm(MPL):
     """
-    FRelu activated - weight fractions sum-normalized - CFReLU for thicknes
+    FRelu activated - weight fractions sum-normalized - CFReLU for thickness
     
     CFReLU: custom FReLU, see activation.py
     """
     def __init__(self, in_size, out_size, hidden_sizes):
         super(MFreluWfNorm, self).__init__(in_size, out_size, hidden_sizes, activation = 'frelu')
         self.split_point = 2
-        #activation for thicknes
+        #activation for thickness
         self.cfrelu = CFReLU(self.split_point, b = 0.01)
         #activation for weight fractions
         self.sumNorm = SumNorm(self.out_size - self.split_point, dim = 1)
@@ -80,7 +80,7 @@ class MFreluWfNorm(MPL):
 
 class MCreluWfNorm(MPL):
     """
-    BRelu activated - weight fractions sum-normalized - BReLU for thicknes
+    BRelu activated - weight fractions sum-normalized - BReLU for thickness
     
     BReLU: Biased ReLU, see activation.py
     """
@@ -88,7 +88,7 @@ class MCreluWfNorm(MPL):
         super(MCreluWfNorm, self).__init__(in_size, out_size, hidden_sizes, activation = 'brelu')
         self.split_point = 2
         self.brelu = BReLU(self.out_size, b = 0.001)
-        #activation for thicknes
+        #activation for thickness
         self.I = nn.Identity()
         #activation for weight fractions
         self.sumNorm = SumNorm(self.out_size - self.split_point, dim = 1)
@@ -107,11 +107,11 @@ class MSplitOut01(MPL):
     """
     multiple outputs - two for thickness one for weight fractions
     
-    BReLU activated - weight fraction sum-normalized - BReLU for thicknes
+    BReLU activated - weight fraction sum-normalized - BReLU for thickness
     """
     def __init__(self, in_size, out_size, hidden_sizes):
         super(MSplitOut01, self).__init__(in_size, out_size, hidden_sizes, activation = 'brelu')
-        self.split_point = 2
+        self.split_point = 3
         self.brelu = BReLU(self.out_size, b = 0.001)
         #activation for thickness
         self.I = nn.Identity()
@@ -124,6 +124,7 @@ class MSplitOut01(MPL):
         activated = (
             self.I(x[:, 0]),
             self.I(x[:, 1]),
+            self.I(x[:, 1]),
             self.sumNorm(x[:, self.split_point:]))
         return activated
 
@@ -131,11 +132,11 @@ class MSplitOut02(MPL):
     """
     multiple outputs - two for thickness one for weight fractions
     
-    FReLU activated - weight fraction sum-normalized - BReLU for thicknes
+    FReLU activated - weight fraction sum-normalized - BReLU for thickness
     """
     def __init__(self, in_size, out_size, hidden_sizes):
         super(MSplitOut02, self).__init__(in_size, out_size, hidden_sizes, activation = 'frelu')
-        self.split_point = 2
+        self.split_point = 3
         #activation for thickness
         self.brelu = BReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
@@ -147,6 +148,7 @@ class MSplitOut02(MPL):
         activated = (
             x[:, 0],
             x[:, 1],
+            x[:, 2],
             self.sumNorm(x[:, self.split_point:]))
         return activated
 
@@ -154,11 +156,11 @@ class MSplitOut03(MPL):
     """
     multiple outputs - two for thickness one for weight fractions
     
-    FReLU activated - weight fraction sum-normalized - CFReLU for thicknes
+    FReLU activated - weight fraction sum-normalized - CFReLU for thickness
     """
     def __init__(self, in_size, out_size, hidden_sizes):
         super(MSplitOut03, self).__init__(in_size, out_size, hidden_sizes, activation = 'frelu')
-        self.split_point = 2
+        self.split_point = 3
         #activation for thickness
         self.cfrelu = CFReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
@@ -170,6 +172,7 @@ class MSplitOut03(MPL):
         activated = (
             x[:, 0],
             x[:, 1],
+            x[:, 2],
             self.sumNorm(x[:, self.split_point:]))
         return activated
 
@@ -177,11 +180,11 @@ class MSplitOut04(MPL):
     """
     multiple outputs - two for thickness one for weight fractions
     
-    Tanh activated - weight fraction sum-normalized - CFReLU for thicknes
+    Tanh activated - weight fraction sum-normalized - CFReLU for thickness
     """
     def __init__(self, in_size, out_size, hidden_sizes):
         super(MSplitOut04, self).__init__(in_size, out_size, hidden_sizes, activation = 'tanh')
-        self.split_point = 2
+        self.split_point = 3
         #activation for thickness
         self.cfrelu = CFReLU(self.out_size, b = 1.0e-3)
         #activation for weight fractions
@@ -193,5 +196,6 @@ class MSplitOut04(MPL):
         activated = (
             x[:, 0],
             x[:, 1],
+            x[:, 2],
             self.sumNorm(x[:, self.split_point:]))
         return activated

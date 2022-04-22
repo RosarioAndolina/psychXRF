@@ -7,14 +7,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import psychXRF.model as Model
 #from .model import MFreluSmax, MFreluWfNorm, MCreluWfNorm, MSplitOut01, MSplitOut02, MSplitOut03, MSplitOut04
-from .data import DataProcessing, DataTransform
+from .data import DataProcessingSF, DataTransform
 from .metrics import R2Score, AR2Score, MAPE
 import psychXRF.metrics as Metrics
 from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
 import h5py
-from numpy import asarray, arange, zeros, median, sqrt, linspace, sin
+from numpy import asarray, arange, zeros, median, sqrt, linspace, sin, where, vstack
 from sys import exit
 import matplotlib.pyplot as plt
 
@@ -64,7 +64,7 @@ config_dir = join(opt.root_dir, 'config')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def normalize(targets, split_point = 2):
+def normalize(targets, split_point = 3):
     n = lambda x: x/x.max()
     for i in range(split_point):
         targets[:,i] = n(targets[:,i])
@@ -73,12 +73,30 @@ def normalize(targets, split_point = 2):
     
 
 print("###### LOADING DATASETS ######")
-dproc = DataProcessing().load_h5_data(opt.h5data)
-dtrans = DataTransform(dproc.get_inputs_from_labels(), dproc.get_targets(), transform_file = transform_file)
+dproc = DataProcessingSF(sfbounds = [0.01,1]).load_h5_data(opt.h5data)
+cnd = where((dproc.data.reflayer_thickness > 1.0e-4) & (dproc.data.sublayer_thickness > 5.0e-4))
+dproc.data.data = dproc.data.data[cnd]
+dproc.shape = dproc.data.data.shape
+dproc.data.labels = dproc.data.labels[cnd]
+dproc.data.reflayer_thickness = dproc.data.reflayer_thickness[cnd]
+dproc.data.sublayer_thickness = dproc.data.sublayer_thickness[cnd]
+dproc.data.weight_fractions = dproc.data.weight_fractions[cnd]
+dproc.scale_factor = dproc.scale_factor[cnd]
+
+inputs = []
+targets = []
+for i in range(3):
+    inputs.append(dproc.get_inputs_from_labels())
+    targets.append(dproc.get_targets())    
+    dproc.new_scale_factor()
+
+dtrans = DataTransform(vstack(inputs), vstack(targets), transform_file = transform_file)
+print(f"inputs shape: {dtrans.inputs.shape}")
 dtrans.input_transform()
 dtrans.target_transform = normalize
-metadata['reflayer_thicknes_max'] = dtrans.targets[:, 0].max()
-metadata['sublayer_thicknes_max'] = dtrans.targets[:, 1].max()
+metadata['reflayer_thickness_max'] = dtrans.targets[:, 0].max()
+metadata['sublayer_thickness_max'] = dtrans.targets[:, 1].max()
+metadata['scale_factor_max'] = dtrans.targets[:,2].max()
 
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
@@ -107,12 +125,12 @@ if hasattr(optim, opt.optimizer):
 else:
     raise ValueError(f"Optimizer {opt.optimizer} not found in torch.optim")
 
-lambda0 = opt.num_epoch / (opt.num_epoch + 2.8)
+lambda0 = opt.num_epoch / (opt.num_epoch + 2.5)
 def lambda1(epoch, lambda0=lambda0):
     #return (lambda0 * (sin(0.1 * epoch)) ** 2) ** epoch
     return lambda0 ** epoch
 
-optimizer = _optim(model.parameters(), lr = opt.lr, weight_decay = 0.0001)
+optimizer = _optim(model.parameters(), lr = opt.lr)
 scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
 metadata['optimizer'] = opt.optimizer
@@ -124,18 +142,21 @@ def train(epoch):
     epoch_rl_loss = 0
     epoch_sl_loss = 0
     epoch_wf_loss = 0
+    epoch_scale_loss = 0
     epoch_loss = 0
     for iteration, batch in enumerate(training_dataloader,1):
         input , target = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
-        rl_out, sl_out, wf_out = model(input)
+        rl_out, sl_out, scale_out, wf_out = model(input)
         rl_loss = criterion(rl_out, target[:, 0])
         sl_loss = criterion(sl_out, target[:, 1])
-        wf_loss = criterion(wf_out, target[:, 2:])
+        scale_loss = criterion(scale_out, target[:, 2])
+        wf_loss = criterion(wf_out, target[:, 3:])
         epoch_rl_loss += rl_loss.item()
         epoch_sl_loss += sl_loss.item()
         epoch_wf_loss += wf_loss.item()
-        loss = (rl_loss*10 + sl_loss*50 + wf_loss*3)/(10+50+3)
+        epoch_scale_loss += scale_loss.item()
+        loss = (rl_loss*10 + sl_loss*50 + scale_loss * 5 + wf_loss*3)/(10+50+5+3)
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -146,16 +167,18 @@ def train(epoch):
         epoch_rl_loss = epoch_rl_loss/len(training_dataloader)
         epoch_sl_loss = epoch_sl_loss/len(training_dataloader)
         epoch_wf_loss = epoch_wf_loss/len(training_dataloader)
+        epoch_scale_loss = epoch_scale_loss/len(training_dataloader)
         print(f"##### Epoch {epoch} Completed: avg. Loss: {epoch_loss:.4f}")
         print(f"      avg. reflayer Loss: {epoch_rl_loss:.4f}")
         print(f"      avg. sublayer Loss: {epoch_sl_loss:.4f}")
+        print(f"      avg. scale factor Loss: {epoch_scale_loss:.4f}")
         print(f"      avg. weigh fractions Loss: {epoch_wf_loss:.4f}\n")
-    return epoch_rl_loss, epoch_sl_loss, epoch_wf_loss, epoch_loss
+    return epoch_rl_loss, epoch_sl_loss, epoch_scale_loss, epoch_wf_loss, epoch_loss
 
 def test(epoch):
     #loss R2 & mape -> LRM
-    mean_LRM = torch.zeros(3,3)
-    LRM = torch.zeros(3,3)
+    mean_LRM = torch.zeros(3,4)
+    LRM = torch.zeros(3,4)
     LRM_funcs = [criterion, r2score, mape]
     with torch.no_grad():
         for batch in testing_dataloader:
@@ -165,7 +188,8 @@ def test(epoch):
             for i in range(3):
                 LRM[i,0] = LRM_funcs[i](prediction[0], target[:,0])
                 LRM[i,1] = LRM_funcs[i](prediction[1], target[:,1])
-                LRM[i,2] = LRM_funcs[i](prediction[2], target[:,2:])
+                LRM[i,2] = LRM_funcs[i](prediction[2], target[:,2])
+                LRM[i,3] = LRM_funcs[i](prediction[3], target[:,3:])
             mean_LRM += LRM
     mean_LRM = mean_LRM/len(testing_dataloader)
     mean_loss = mean_LRM[0].mean()
@@ -178,15 +202,18 @@ def test(epoch):
         print(f"##### Test Loss: {mean_loss.item():.4f}")
         print(f"      Test reflayer Loss: {mean_LRM[0,0]:.4f}")
         print(f"      Test sublayer Loss: {mean_LRM[0,1]:.4f}")
-        print(f"      Test weith fraction Loss: {mean_LRM[0,2]:.4f}")
+        print(f"      Test scale factor Loss: {mean_LRM[0,2]:.4f}")
+        print(f"      Test weith fraction Loss: {mean_LRM[0,3]:.4f}")
         print(f"##### Test R2: {mean_metric.item():.4f}")
         print(f"      Test reflayer R2: {mean_LRM[1,0]:.4f}")
         print(f"      Test sublayer R2: {mean_LRM[1,1]:.4f}")
-        print(f"      Test weight fractions R2: {mean_LRM[1,2]:.4f}")
+        print(f"      Test scale factor R2: {mean_LRM[1,2]:.4f}")
+        print(f"      Test weight fractions R2: {mean_LRM[1,3]:.4f}")
         print(f"##### Test Adjusted R2: {ar2score:.4f}")
         print(f"      ACCURACY reflayer: {100 - mean_LRM[2,0]}")
         print(f"      ACCURACY sublayer: {100 - mean_LRM[2,1]}")
-        print(f"      ACCURACY weight fractions: {100 - mean_LRM[2,2]}")
+        print(f"      ACCURACY scale factor: {100 - mean_LRM[2,2]}")
+        print(f"      ACCURACY weight fractions: {100 - mean_LRM[2,3]}")
         print(f"      mean MAPE: {mean_mape}")
     return torch.cat((mean_LRM[0], mean_loss.reshape(1), 1 - mean_LRM[1]))
     
@@ -218,47 +245,58 @@ def plot_results(best_checkpoint, r2 = False):
             predictions.append(models[-1](inputs)[-1])
         else:
             predictions.append(models[-1](inputs))
-    x = linspace(1e-3,1,10)
+    #x = linspace(1e-3,1,10)
     fig1, ax = plt.subplots(1,2)
-    ax[0].scatter(targets[:, 0], predictions[0], alpha = 0.3)
-    ax[0].plot(x,x, c = "darkorange", label = "Ideal")
-    ax[0].set_title("reflayer prediction vs target\nnormalized")
-    ax[0].set_xlabel("targets")
-    ax[0].set_ylabel("prediction")
-    ax[0].set_xlim(0,1)
-    ax[0].set_ylim(0,1)
+    ax[0].scatter(targets[:, 1]*metadata['sublayer_thickness_max'], targets[:,0]*metadata['reflayer_thickness_max'], s = 5, alpha = 0.3)
+    #ax[0].plot(x,x, c = "darkorange", label = "Ideal")
+    ax[0].set_title("reflayer thickness vs sublayer thickness\nTargets", fontsize = 10)
+    ax[0].set_xlabel(r"sl thickness $\mu$")
+    ax[0].set_ylabel(r"rl thickness $\mu$")
+    #ax[0].set_xlim(0,1)
+    #ax[0].set_ylim(0,1)
     ax[0].legend()
     
-    ax[1].scatter(targets[:, 1], predictions[1], alpha = 0.3)
-    ax[1].plot(x,x, c = "darkorange", label = "Ideal")
-    ax[1].set_title("sublayer prediction vs target\nnormallized")
-    ax[1].set_xlabel("targets")
-    ax[1].set_ylabel("prediction")
-    ax[1].set_xlim(0,1)
-    ax[1].set_ylim(0,1)
+    ax[1].scatter(predictions[1]*metadata['sublayer_thickness_max'], predictions[0]*metadata['reflayer_thickness_max'],  s = 5, alpha = 0.3)
+    #ax[1].plot(x,x, c = "darkorange", label = "Ideal")
+    ax[1].set_title("reflayer thickness vs sublayer thickness\nPredicted", fontsize = 10)
+    ax[1].set_xlabel(r"sl thickness $\mu$")
+    ax[1].set_ylabel(r"rl thickness $\mu$")
+    #ax[1].set_xlim(0,1)
+    #ax[1].set_ylim(0,1)
     ax[1].legend()
-    fig2, ax = plt.subplots(2,2, figsize = (6,7))
+    #combo = list(combinations[])
+    fig2, ax2 = plt.subplots(2,2, figsize = (6,7))
     for i in range(2):
         for j in range(2):
-            ax[i,j].scatter(targets[:, 2:][:,j::2][:,i], predictions[2][:,j::2][:,i], alpha = 0.3)
-            ax[i,j].plot(x,x, c = "darkorange", label = "Ideal")
-            ax[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::2][i]} weight fraction\ntransformed")
-            ax[i,j].set_xlabel("targets")
-            ax[i,j].set_ylabel("prediction")
-            ax[i,j].set_xlim(0,1)
-            ax[i,j].set_ylim(0,1)
-            ax[i,j].legend()
+            t = targets[:, 3:][:,j::2][:,i]
+            p = predictions[3][:,j::2][:,i]
+            ax2[i,j].hist(t.numpy(), bins = 50, histtype = 'step', label = 'target')
+            ax2[i,j].hist(p.numpy(), bins = 50, histtype = 'step', label = 'prediction')
+            #ax2[i,j].plot(x,x, c = "darkorange", label = "Ideal")
+            ax2[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::2][i]} weight fraction")
+            ax2[i,j].set_xlabel("weight fraction")
+            #ax2[i,j].set_ylabel("prediction")
+            #ax2[i,j].set_xlim(0,1)
+            #ax2[i,j].set_ylim(1.0e-8,torch.max(t,p).max())
+            ax2[i,j].legend()
+    fig3, ax3 = plt.subplots()
+    ax3.hist(targets[:,2].numpy()*metadata['scale_factor_max'], bins = 50, histtype = 'step', label = 'target')
+    ax3.hist(predictions[2].numpy()*metadata['scale_factor_max'], bins = 50, histtype = 'step', label = 'prediction')
+    ax3.set_title("Scale factor")
+    ax3.set_xlabel("scale factor (a.u)")
+    ax3.legend()
     fig1.tight_layout()
     fig2.tight_layout()
+    fig3.tight_layout()
     plt.show()
         
 
 def main():
-    train_loss = torch.zeros((4,opt.num_epoch))
-    test_loss = torch.zeros((7, opt.num_epoch))
+    train_loss = torch.zeros((5,opt.num_epoch))
+    test_loss = torch.zeros((9, opt.num_epoch))
     trainL = train(1)
     testL = test(1)
-    max_loss = testL[:4].max()
+    max_loss = testL[:5].max()
     train_loss[:,0] = torch.tensor(trainL)
     test_loss[:,0] = testL
     if opt.plot:
@@ -270,8 +308,9 @@ def main():
         x = arange(opt.num_epoch)
         test_line_rl, = ax.plot(x, test_loss[0].numpy(), label = 'reference layer')
         test_line_sl, = ax.plot(x, test_loss[1].numpy(), label = 'sublayer')
-        test_line_wf, = ax.plot(x, test_loss[2].numpy(), label = 'weight fractions')
-        test_line_total, = ax.plot(x, test_loss[3].numpy(), label = 'mean')
+        test_line_sf, = ax.plot(x, test_loss[2].numpy(), label = 'scale factor')
+        test_line_wf, = ax.plot(x, test_loss[3].numpy(), label = 'weight fractions')
+        test_line_total, = ax.plot(x, test_loss[5].numpy(), label = 'mean')
         # test_line, = ax.plot(x, test_loss, label = 'Test Loss')
         ax.legend()
         print(f"\n\nTraining model {model_name}")
@@ -285,8 +324,9 @@ def main():
             # train_line.set_ydata(train_loss)
             test_line_rl.set_ydata(test_loss[0].numpy())
             test_line_sl.set_ydata(test_loss[1].numpy())
-            test_line_wf.set_ydata(test_loss[2].numpy())
-            test_line_total.set_ydata(test_loss[3].numpy())
+            test_line_sf.set_ydata(test_loss[2].numpy())
+            test_line_wf.set_ydata(test_loss[3].numpy())
+            test_line_total.set_ydata(test_loss[4].numpy())
             fig.canvas.draw_idle()
             fig.canvas.flush_events()
     # train_loss = asarray(train_loss)
