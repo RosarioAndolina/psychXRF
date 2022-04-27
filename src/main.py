@@ -14,7 +14,7 @@ from os import getenv, makedirs
 from os.path import join, exists, basename
 from time import localtime
 import h5py
-from numpy import asarray, arange, zeros, median, sqrt, linspace, sin, where, vstack
+from numpy import asarray, arange, zeros, median, sqrt, linspace, sin, where, vstack, int8, ceil
 from sys import exit
 import matplotlib.pyplot as plt
 
@@ -265,16 +265,23 @@ def plot_results(best_checkpoint, r2 = False):
     #ax[1].set_ylim(0,1)
     ax[1].legend()
     #combo = list(combinations[])
-    fig2, ax2 = plt.subplots(2,2, figsize = (6,7))
-    for i in range(2):
-        for j in range(2):
-            t = targets[:, 3:][:,j::2][:,i]
-            p = predictions[3][:,j::2][:,i]
-            ax2[i,j].hist(t.numpy(), bins = 50, histtype = 'step', label = 'target')
-            ax2[i,j].hist(p.numpy(), bins = 50, histtype = 'step', label = 'prediction')
+    x = len(dproc.data.metadata['reflayer_elements'])
+    nrow = int8(sqrt(x))
+    ncol = int8(ceil(x/nrow))
+    bins = linspace(targets.numpy().min(), targets.numpy().max(), 50)
+    fig2, ax2 = plt.subplots(nrow,ncol, figsize = (9,10))
+    for i in range(nrow):
+        for j in range(ncol):
+            try:
+                t = targets[:, 3:][:,j::ncol][:,i]
+                p = predictions[3][:,j::ncol][:,i]
+                ax2[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::ncol][i]}")
+                ax2[i,j].hist(t.numpy(), bins = bins, histtype = 'step', label = 'target')
+                ax2[i,j].hist(p.numpy(), bins = bins, histtype = 'step', label = 'prediction')
+                ax2[i,j].set_xlabel("weight fraction")
+            except IndexError:
+                pass
             #ax2[i,j].plot(x,x, c = "darkorange", label = "Ideal")
-            ax2[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::2][i]} weight fraction")
-            ax2[i,j].set_xlabel("weight fraction")
             #ax2[i,j].set_ylabel("prediction")
             #ax2[i,j].set_xlim(0,1)
             #ax2[i,j].set_ylim(1.0e-8,torch.max(t,p).max())
