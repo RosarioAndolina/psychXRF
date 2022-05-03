@@ -73,8 +73,8 @@ def normalize(targets, split_point = 3):
     
 
 print("###### LOADING DATASETS ######")
-dproc = DataProcessingSF(sfbounds = [0.01,1]).load_h5_data(opt.h5data)
-cnd = where((dproc.data.reflayer_thickness > 1.0e-4) & (dproc.data.sublayer_thickness > 5.0e-4))
+dproc = DataProcessingSF(sfbounds = [0.01,1.5]).load_h5_data(opt.h5data)
+cnd = where((dproc.data.sublayer_thickness > 20.0e-4) & (dproc.data.sublayer_thickness <= 40.0e-4))
 dproc.data.data = dproc.data.data[cnd]
 dproc.shape = dproc.data.data.shape
 dproc.data.labels = dproc.data.labels[cnd]
@@ -85,7 +85,7 @@ dproc.scale_factor = dproc.scale_factor[cnd]
 
 inputs = []
 targets = []
-for i in range(3):
+for i in range(8):
     inputs.append(dproc.get_inputs_from_labels())
     targets.append(dproc.get_targets())    
     dproc.new_scale_factor()
@@ -278,6 +278,7 @@ def plot_results(best_checkpoint, r2 = False):
                 ax2[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::ncol][i]}")
                 ax2[i,j].hist(t.numpy(), bins = bins, histtype = 'step', label = 'target')
                 ax2[i,j].hist(p.numpy(), bins = bins, histtype = 'step', label = 'prediction')
+                ax2[i,j].set_yscale('log')
                 ax2[i,j].set_xlabel("weight fraction")
             except IndexError:
                 pass
