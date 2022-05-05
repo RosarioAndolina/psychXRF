@@ -31,6 +31,6 @@ class DatasetSF(CustomDataset):
         x = self.inputs[idx].copy() 
         y = self.targets[idx].copy()
         x = x * scale_factor
-        y[2] =  y[2] * scale_factor
+        y[1] =  y[1] * scale_factor
         
         return x, y

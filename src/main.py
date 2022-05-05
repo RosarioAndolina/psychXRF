@@ -64,7 +64,7 @@ config_dir = join(opt.root_dir, 'config')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def normalize(targets, split_point = 3):
+def normalize(targets, split_point = 2):
     n = lambda x: x/x.max()
     for i in range(split_point):
         targets[:,i] = n(targets[:,i])
@@ -73,19 +73,19 @@ def normalize(targets, split_point = 3):
     
 
 print("###### LOADING DATASETS ######")
-dproc = DataProcessingSF(sfbounds = [0.01,1.5]).load_h5_data(opt.h5data)
-cnd = where((dproc.data.sublayer_thickness > 20.0e-4) & (dproc.data.sublayer_thickness <= 40.0e-4))
-dproc.data.data = dproc.data.data[cnd]
-dproc.shape = dproc.data.data.shape
-dproc.data.labels = dproc.data.labels[cnd]
-dproc.data.reflayer_thickness = dproc.data.reflayer_thickness[cnd]
-dproc.data.sublayer_thickness = dproc.data.sublayer_thickness[cnd]
-dproc.data.weight_fractions = dproc.data.weight_fractions[cnd]
-dproc.scale_factor = dproc.scale_factor[cnd]
+dproc = DataProcessingSF(sfbounds = [0.1, 2] ).load_h5_data(opt.h5data)
+# cnd = where((dproc.data.sublayer_thickness > 20.0e-4) & (dproc.data.sublayer_thickness <= 40.0e-4))
+# dproc.data.data = dproc.data.data[cnd]
+# dproc.shape = dproc.data.data.shape
+# dproc.data.labels = dproc.data.labels[cnd]
+# dproc.data.reflayer_thickness = dproc.data.reflayer_thickness[cnd]
+# dproc.data.sublayer_thickness = dproc.data.sublayer_thickness[cnd]
+# dproc.data.weight_fractions = dproc.data.weight_fractions[cnd]
+# dproc.scale_factor = dproc.scale_factor[cnd]
 
 inputs = []
 targets = []
-for i in range(8):
+for i in range(2):
     inputs.append(dproc.get_inputs_from_labels())
     targets.append(dproc.get_targets())    
     dproc.new_scale_factor()
@@ -95,8 +95,8 @@ print(f"inputs shape: {dtrans.inputs.shape}")
 dtrans.input_transform()
 dtrans.target_transform = normalize
 metadata['reflayer_thickness_max'] = dtrans.targets[:, 0].max()
-metadata['sublayer_thickness_max'] = dtrans.targets[:, 1].max()
-metadata['scale_factor_max'] = dtrans.targets[:,2].max()
+#metadata['sublayer_thickness_max'] = None
+metadata['scale_factor_max'] = dtrans.targets[:,1].max()
 
 train_set = dtrans.get_training_set()
 test_set = dtrans.get_testing_set()
@@ -106,7 +106,10 @@ testing_dataloader = DataLoader(test_set, opt.test_batch_size, pin_memory = True
 print("###### Building Model ######")
 if opt.model:
     _model = getattr(Model, opt.model)
-    model = _model(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
+    if 'ResNet' in opt.model:
+        model = _model(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1]).to(device)
+    else:
+        model = _model(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
 else:
     model = Model.MSplitOut04(in_size = dtrans.inputs.shape[1], out_size = dtrans.targets.shape[1], hidden_sizes = [int(x) for x in opt.hidden_sizes]).to(device)
 if hasattr(nn, opt.criterion):
@@ -125,7 +128,7 @@ if hasattr(optim, opt.optimizer):
 else:
     raise ValueError(f"Optimizer {opt.optimizer} not found in torch.optim")
 
-lambda0 = opt.num_epoch / (opt.num_epoch + 2.5)
+lambda0 = opt.num_epoch / (opt.num_epoch)
 def lambda1(epoch, lambda0=lambda0):
     #return (lambda0 * (sin(0.1 * epoch)) ** 2) ** epoch
     return lambda0 ** epoch
@@ -140,23 +143,20 @@ print(model)
 
 def train(epoch):
     epoch_rl_loss = 0
-    epoch_sl_loss = 0
     epoch_wf_loss = 0
     epoch_scale_loss = 0
     epoch_loss = 0
     for iteration, batch in enumerate(training_dataloader,1):
         input , target = batch[0].to(device), batch[1].to(device)
         optimizer.zero_grad()
-        rl_out, sl_out, scale_out, wf_out = model(input)
+        rl_out, scale_out, wf_out = model(input)
         rl_loss = criterion(rl_out, target[:, 0])
-        sl_loss = criterion(sl_out, target[:, 1])
-        scale_loss = criterion(scale_out, target[:, 2])
-        wf_loss = criterion(wf_out, target[:, 3:])
+        scale_loss = criterion(scale_out, target[:, 1])
+        wf_loss = criterion(wf_out, target[:, 2:])
         epoch_rl_loss += rl_loss.item()
-        epoch_sl_loss += sl_loss.item()
         epoch_wf_loss += wf_loss.item()
         epoch_scale_loss += scale_loss.item()
-        loss = (rl_loss*10 + sl_loss*50 + scale_loss * 5 + wf_loss*3)/(10+50+5+3)
+        loss = (rl_loss*10 + scale_loss * 50 + wf_loss*30)/(10+50+30)
         epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -165,20 +165,18 @@ def train(epoch):
     if (epoch % 50 == 0):
         epoch_loss = epoch_loss/len(training_dataloader)
         epoch_rl_loss = epoch_rl_loss/len(training_dataloader)
-        epoch_sl_loss = epoch_sl_loss/len(training_dataloader)
         epoch_wf_loss = epoch_wf_loss/len(training_dataloader)
         epoch_scale_loss = epoch_scale_loss/len(training_dataloader)
         print(f"##### Epoch {epoch} Completed: avg. Loss: {epoch_loss:.4f}")
         print(f"      avg. reflayer Loss: {epoch_rl_loss:.4f}")
-        print(f"      avg. sublayer Loss: {epoch_sl_loss:.4f}")
         print(f"      avg. scale factor Loss: {epoch_scale_loss:.4f}")
         print(f"      avg. weigh fractions Loss: {epoch_wf_loss:.4f}\n")
-    return epoch_rl_loss, epoch_sl_loss, epoch_scale_loss, epoch_wf_loss, epoch_loss
+    return epoch_rl_loss, epoch_scale_loss, epoch_wf_loss, epoch_loss
 
 def test(epoch):
     #loss R2 & mape -> LRM
-    mean_LRM = torch.zeros(3,4)
-    LRM = torch.zeros(3,4)
+    mean_LRM = torch.zeros(3,3)
+    LRM = torch.zeros(3,3)
     LRM_funcs = [criterion, r2score, mape]
     with torch.no_grad():
         for batch in testing_dataloader:
@@ -188,8 +186,7 @@ def test(epoch):
             for i in range(3):
                 LRM[i,0] = LRM_funcs[i](prediction[0], target[:,0])
                 LRM[i,1] = LRM_funcs[i](prediction[1], target[:,1])
-                LRM[i,2] = LRM_funcs[i](prediction[2], target[:,2])
-                LRM[i,3] = LRM_funcs[i](prediction[3], target[:,3:])
+                LRM[i,2] = LRM_funcs[i](prediction[2], target[:,2:])
             mean_LRM += LRM
     mean_LRM = mean_LRM/len(testing_dataloader)
     mean_loss = mean_LRM[0].mean()
@@ -201,19 +198,16 @@ def test(epoch):
         print(f"EPOCH {epoch}")
         print(f"##### Test Loss: {mean_loss.item():.4f}")
         print(f"      Test reflayer Loss: {mean_LRM[0,0]:.4f}")
-        print(f"      Test sublayer Loss: {mean_LRM[0,1]:.4f}")
-        print(f"      Test scale factor Loss: {mean_LRM[0,2]:.4f}")
-        print(f"      Test weith fraction Loss: {mean_LRM[0,3]:.4f}")
+        print(f"      Test scale factor Loss: {mean_LRM[0,1]:.4f}")
+        print(f"      Test weith fraction Loss: {mean_LRM[0,2]:.4f}")
         print(f"##### Test R2: {mean_metric.item():.4f}")
         print(f"      Test reflayer R2: {mean_LRM[1,0]:.4f}")
-        print(f"      Test sublayer R2: {mean_LRM[1,1]:.4f}")
-        print(f"      Test scale factor R2: {mean_LRM[1,2]:.4f}")
-        print(f"      Test weight fractions R2: {mean_LRM[1,3]:.4f}")
+        print(f"      Test scale factor R2: {mean_LRM[1,1]:.4f}")
+        print(f"      Test weight fractions R2: {mean_LRM[1,2]:.4f}")
         print(f"##### Test Adjusted R2: {ar2score:.4f}")
         print(f"      ACCURACY reflayer: {100 - mean_LRM[2,0]}")
-        print(f"      ACCURACY sublayer: {100 - mean_LRM[2,1]}")
-        print(f"      ACCURACY scale factor: {100 - mean_LRM[2,2]}")
-        print(f"      ACCURACY weight fractions: {100 - mean_LRM[2,3]}")
+        print(f"      ACCURACY scale factor: {100 - mean_LRM[2,1]}")
+        print(f"      ACCURACY weight fractions: {100 - mean_LRM[2,2]}")
         print(f"      mean MAPE: {mean_mape}")
     return torch.cat((mean_LRM[0], mean_loss.reshape(1), 1 - mean_LRM[1]))
     
@@ -246,24 +240,16 @@ def plot_results(best_checkpoint, r2 = False):
         else:
             predictions.append(models[-1](inputs))
     #x = linspace(1e-3,1,10)
-    fig1, ax = plt.subplots(1,2)
-    ax[0].scatter(targets[:, 1]*metadata['sublayer_thickness_max'], targets[:,0]*metadata['reflayer_thickness_max'], s = 5, alpha = 0.3)
-    #ax[0].plot(x,x, c = "darkorange", label = "Ideal")
-    ax[0].set_title("reflayer thickness vs sublayer thickness\nTargets", fontsize = 10)
-    ax[0].set_xlabel(r"sl thickness $\mu$")
-    ax[0].set_ylabel(r"rl thickness $\mu$")
+    fig1, ax1 = plt.subplots()
+    ax1.scatter(targets[:, 1]*metadata['scale_factor_max'], targets[:,0]*metadata['reflayer_thickness_max'], s = 5, alpha = 0.3)
+    ax1.scatter(predictions[1]*metadata['scale_factor_max'], predictions[0]*metadata['reflayer_thickness_max'],  s = 5, alpha = 0.3, label = 'prediction')
+    ax1.set_title("reflayer thickness vs scale factor", fontsize = 10)
+    ax1.set_xlabel(r"scale factor")
+    ax1.set_ylabel(r"rl thickness $\mu$")
     #ax[0].set_xlim(0,1)
     #ax[0].set_ylim(0,1)
-    ax[0].legend()
+    ax1.legend()
     
-    ax[1].scatter(predictions[1]*metadata['sublayer_thickness_max'], predictions[0]*metadata['reflayer_thickness_max'],  s = 5, alpha = 0.3)
-    #ax[1].plot(x,x, c = "darkorange", label = "Ideal")
-    ax[1].set_title("reflayer thickness vs sublayer thickness\nPredicted", fontsize = 10)
-    ax[1].set_xlabel(r"sl thickness $\mu$")
-    ax[1].set_ylabel(r"rl thickness $\mu$")
-    #ax[1].set_xlim(0,1)
-    #ax[1].set_ylim(0,1)
-    ax[1].legend()
     #combo = list(combinations[])
     x = len(dproc.data.metadata['reflayer_elements'])
     nrow = int8(sqrt(x))
@@ -273,8 +259,8 @@ def plot_results(best_checkpoint, r2 = False):
     for i in range(nrow):
         for j in range(ncol):
             try:
-                t = targets[:, 3:][:,j::ncol][:,i]
-                p = predictions[3][:,j::ncol][:,i]
+                t = targets[:, 2:][:,j::ncol][:,i]
+                p = predictions[2][:,j::ncol][:,i]
                 ax2[i,j].set_title(f"{dproc.data.metadata['reflayer_elements'][j::ncol][i]}")
                 ax2[i,j].hist(t.numpy(), bins = bins, histtype = 'step', label = 'target')
                 ax2[i,j].hist(p.numpy(), bins = bins, histtype = 'step', label = 'prediction')
@@ -287,12 +273,19 @@ def plot_results(best_checkpoint, r2 = False):
             #ax2[i,j].set_xlim(0,1)
             #ax2[i,j].set_ylim(1.0e-8,torch.max(t,p).max())
             ax2[i,j].legend()
-    fig3, ax3 = plt.subplots()
-    ax3.hist(targets[:,2].numpy()*metadata['scale_factor_max'], bins = 50, histtype = 'step', label = 'target')
-    ax3.hist(predictions[2].numpy()*metadata['scale_factor_max'], bins = 50, histtype = 'step', label = 'prediction')
-    ax3.set_title("Scale factor")
-    ax3.set_xlabel("scale factor (a.u)")
-    ax3.legend()
+    fig3, ax3 = plt.subplots(1,2)
+    c,b,_ = ax3[0].hist(targets[:,1].numpy()*metadata['scale_factor_max'], bins = 50, histtype = 'step', label = 'target')
+    ax3[0].hist(predictions[1].numpy()*metadata['scale_factor_max'], bins = b, histtype = 'step', label = 'prediction')
+    ax3[0].set_title("Scale factor")
+    ax3[0].set_ylabel("counts")
+    ax3[0].legend()
+    
+    c, b, _ = ax3[1].hist(targets[:,0].numpy()*metadata['reflayer_thickness_max'], bins = 50, histtype = 'step', label = 'target')
+    ax3[1].hist(predictions[0].numpy()*metadata['reflayer_thickness_max'], bins = b, histtype = 'step', label = 'prediction')
+    ax3[1].set_title("Ref. layer thicknes")
+    ax3[1].set_ylabel("counts")
+    ax3[1].legend()
+    
     fig1.tight_layout()
     fig2.tight_layout()
     fig3.tight_layout()
@@ -300,11 +293,11 @@ def plot_results(best_checkpoint, r2 = False):
         
 
 def main():
-    train_loss = torch.zeros((5,opt.num_epoch))
-    test_loss = torch.zeros((9, opt.num_epoch))
+    train_loss = torch.zeros((4,opt.num_epoch))
+    test_loss = torch.zeros((7, opt.num_epoch))
     trainL = train(1)
     testL = test(1)
-    max_loss = testL[:5].max()
+    max_loss = testL[:4].max()
     train_loss[:,0] = torch.tensor(trainL)
     test_loss[:,0] = testL
     if opt.plot:
@@ -315,32 +308,33 @@ def main():
         ax.set_title(f'Model {model_name}\ntesting set loss')
         x = arange(opt.num_epoch)
         test_line_rl, = ax.plot(x, test_loss[0].numpy(), label = 'reference layer')
-        test_line_sl, = ax.plot(x, test_loss[1].numpy(), label = 'sublayer')
-        test_line_sf, = ax.plot(x, test_loss[2].numpy(), label = 'scale factor')
-        test_line_wf, = ax.plot(x, test_loss[3].numpy(), label = 'weight fractions')
-        test_line_total, = ax.plot(x, test_loss[5].numpy(), label = 'mean')
+        test_line_sf, = ax.plot(x, test_loss[1].numpy(), label = 'scale factor')
+        test_line_wf, = ax.plot(x, test_loss[2].numpy(), label = 'weight fractions')
+        test_line_total, = ax.plot(x, test_loss[3].numpy(), label = 'mean')
         # test_line, = ax.plot(x, test_loss, label = 'Test Loss')
         ax.legend()
         print(f"\n\nTraining model {model_name}")
     for epoch in range(2, opt.num_epoch + 1):
-        train_loss[:, epoch-1] = torch.tensor(train(epoch))
-        scheduler.step()
-        test_loss[:, epoch-1] = test(epoch)
-        checkpoint(epoch)
-        # plot results
-        if opt.plot:
-            # train_line.set_ydata(train_loss)
-            test_line_rl.set_ydata(test_loss[0].numpy())
-            test_line_sl.set_ydata(test_loss[1].numpy())
-            test_line_sf.set_ydata(test_loss[2].numpy())
-            test_line_wf.set_ydata(test_loss[3].numpy())
-            test_line_total.set_ydata(test_loss[4].numpy())
-            fig.canvas.draw_idle()
-            fig.canvas.flush_events()
+        try:
+            train_loss[:, epoch-1] = torch.tensor(train(epoch))
+            scheduler.step()
+            test_loss[:, epoch-1] = test(epoch)
+            checkpoint(epoch)
+            # plot results
+            if opt.plot:
+                # train_line.set_ydata(train_loss)
+                test_line_rl.set_ydata(test_loss[0].numpy())
+                test_line_sf.set_ydata(test_loss[1].numpy())
+                test_line_wf.set_ydata(test_loss[2].numpy())
+                test_line_total.set_ydata(test_loss[3].numpy())
+                fig.canvas.draw_idle()
+                fig.canvas.flush_events()
+        except KeyboardInterrupt:
+            break
     # train_loss = asarray(train_loss)
     # test_loss = asarray(test_loss)
     #checkpoint_index = (torch.arange(10, opt.num_epoch + 1, 10)[1:]) - 1
-    checkpoint_index = (torch.arange(10, opt.num_epoch + 1, 10)) - 1
+    checkpoint_index = (torch.arange(10, epoch, 10)) - 1
     best_test_loss = (test_loss[:, checkpoint_index].min(dim = 1).indices + 1) *10
     metadata['best_checkpoint'] = best_test_loss.numpy()
     loss_fname = join(model_dir, f'{model_name}_loss.h5')
@@ -355,8 +349,7 @@ def main():
     if opt.plot:
         plt.ioff()
         plt.show()
-    plot_results(metadata['best_checkpoint'], r2 = True)
+    plot_results(metadata['best_checkpoint'])
 
 if __name__ == '__main__':
     main()
-

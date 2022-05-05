@@ -196,7 +196,6 @@ class DataProcessingSF(DataProcessing):
     def get_targets(self):
         # convert to micron
         targets = hstack((self.data.reflayer_thickness.reshape(self.shape[0],1)*1.0e4,
-                          self.data.sublayer_thickness.reshape(self.shape[0],1)*1.0e4,
                           self.scale_factor,
                           self.data.weight_fractions))
         return targets
