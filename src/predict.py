@@ -1,7 +1,7 @@
 import argparse
 import torch
 from .data import DataProcessing, DataTransform
-from .model import MPL
+import psychXRF.model as Model
 import h5py
 
 class psychXRF:
@@ -26,8 +26,8 @@ class psychXRF:
             dtrans = DataTransform(self.inputs).load_transform_info(self.transform_file).input_transform()
         else:
             raise ValueError('No inputs yet')
-        inputs = torch.Tensor(dtrans.inputs).to(self.device)
-        predicted = self.model(inputs)
+        self.inputs = torch.Tensor(dtrans.inputs).to(self.device)
+        predicted = self.model(self.inputs)
         if isinstance(predicted, tuple):
             self.predicted = []
             for prediction in predicted:
