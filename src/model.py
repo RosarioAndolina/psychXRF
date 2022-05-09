@@ -316,3 +316,37 @@ class ResNet02(nn.Module):
             x[:, 1],
             self.sumNorm(x[:, self.split_point:]))
         return activated
+
+class ResNet03(nn.Module):
+    def __init__(self, in_size, out_size):
+        super().__init__()
+        self.split_point = 2
+        self.in_size = in_size
+        self.out_size = out_size
+        self.block1 = ResBlock(32)
+        self.linear1 = nn.Linear(self.in_size, self.block1.size)
+        self.block2 = ResBlock(32)
+        #self.linear2 = nn.Linear(self.block2.size, self.out_size)
+        self.block3 = ResBlock(32)
+        #self.linear3 = nn.Linear(self.block3.size, self.out_size)
+        self.block4 = ResBlock(32)
+        self.linear2 = nn.Linear(self.block4.size, self.out_size)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim = 1)
+    
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.block1(x)
+        x = self.relu(x)
+        x = self.block2(x)
+        x = self.relu(x)
+        x = self.block3(x)
+        x = self.relu(x)
+        x = self.block4(x)
+        x = self.relu(x)
+        x = self.linear2(x)
+        activated = (
+            x[:, 0],
+            x[:, 1],
+            self.softmax(x[:, self.split_point:]))
+        return activated

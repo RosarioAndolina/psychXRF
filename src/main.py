@@ -85,7 +85,7 @@ dproc = DataProcessingSF(sfbounds = [0.1, 2] ).load_h5_data(opt.h5data)
 
 inputs = []
 targets = []
-for i in range(2):
+for i in range(5):
     inputs.append(dproc.get_inputs_from_labels())
     targets.append(dproc.get_targets())    
     dproc.new_scale_factor()
